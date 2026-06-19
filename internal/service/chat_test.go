@@ -50,6 +50,14 @@ func TestChatServiceSendMessageStoresUserAndAssistantMessages(t *testing.T) {
 		Content:      "今天销售额是多少",
 		DatasourceID: 7,
 		RequestID:    "rid-chat",
+		AuditOrigin: AuditOrigin{
+			Source:           AuditSourceEmbed,
+			EmbedAppID:       "emb_test",
+			EmbedSessionID:   11,
+			ExternalUserID:   "u-1",
+			ExternalUserName: "测试用户",
+			SessionKey:       "dashboard:123",
+		},
 	})
 	if err != nil {
 		t.Fatalf("send message: %v", err)
@@ -74,6 +82,10 @@ func TestChatServiceSendMessageStoresUserAndAssistantMessages(t *testing.T) {
 	}
 	if auditRecorder.events[0].EventType != auditpkg.EventChatMessage || auditRecorder.events[0].ResourceID != 10 || auditRecorder.events[0].RequestID != "rid-chat" {
 		t.Fatalf("unexpected audit event: %+v", auditRecorder.events[0])
+	}
+	payload := auditRecorder.events[0].Payload
+	if payload["source"] != AuditSourceEmbed || payload["app_id"] != "emb_test" || payload["embed_app_id"] != "emb_test" || payload["embed_session_id"] != uint64(11) || payload["external_user_id"] != "u-1" || payload["external_user_name"] != "测试用户" || payload["session_key"] != "dashboard:123" {
+		t.Fatalf("unexpected embed audit payload: %+v", payload)
 	}
 }
 
@@ -163,12 +175,28 @@ func TestChatServiceSendMessageAutoExecutesReviewedSQL(t *testing.T) {
 		Content:      "订单数",
 		DatasourceID: 7,
 		AutoExecute:  true,
+		RequestID:    "rid-chat-exec",
+		IP:           "127.0.0.1",
+		UserAgent:    "agent",
+		AuditOrigin: AuditOrigin{
+			Source:         AuditSourceEmbed,
+			EmbedAppID:     "emb_test",
+			EmbedSessionID: 12,
+			ExternalUserID: "u-2",
+			SessionKey:     "dashboard:456",
+		},
 	})
 	if err != nil {
 		t.Fatalf("send message: %v", err)
 	}
 	if executor.lastInput.SQL != "select count(*) from orders LIMIT 200" {
 		t.Fatalf("unexpected executed sql: %s", executor.lastInput.SQL)
+	}
+	if executor.lastInput.RequestID != "rid-chat-exec" || executor.lastInput.IP != "127.0.0.1" || executor.lastInput.UserAgent != "agent" {
+		t.Fatalf("expected request metadata to be forwarded, got %+v", executor.lastInput)
+	}
+	if executor.lastInput.AuditOrigin.Source != AuditSourceEmbed || executor.lastInput.AuditOrigin.EmbedAppID != "emb_test" || executor.lastInput.AuditOrigin.EmbedSessionID != 12 || executor.lastInput.AuditOrigin.ExternalUserID != "u-2" || executor.lastInput.AuditOrigin.SessionKey != "dashboard:456" {
+		t.Fatalf("expected embed audit origin to be forwarded, got %+v", executor.lastInput.AuditOrigin)
 	}
 	if result.AssistantMessage.QueryExecutionID != 99 {
 		t.Fatalf("expected assistant message to reference execution 99, got %d", result.AssistantMessage.QueryExecutionID)

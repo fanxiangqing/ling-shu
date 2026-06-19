@@ -229,6 +229,7 @@ func (h *EmbedHandler) StreamMessage(c *gin.Context) {
 		RequestID:             meta.RequestID,
 		IP:                    meta.IP,
 		UserAgent:             meta.UserAgent,
+		AuditOrigin:           embedAuditOrigin(access),
 	}, func(event query.AgentEvent) error {
 		return writeSSEvent(c, event.Type, event)
 	})
@@ -310,6 +311,7 @@ func (h *EmbedHandler) RealtimeVoice(c *gin.Context) {
 			RequestID:             meta.RequestID,
 			IP:                    meta.IP,
 			UserAgent:             meta.UserAgent,
+			AuditOrigin:           embedAuditOrigin(access),
 		}, audio, func(event service.VoiceChatStreamEvent) error {
 			eventCopy := event
 			return writeJSON(realtimeVoiceServerMessage{Type: event.Stage, Event: &eventCopy})
@@ -373,6 +375,20 @@ func embedAccessToken(c *gin.Context) string {
 		return strings.TrimSpace(raw[len("Embed "):])
 	}
 	return strings.TrimSpace(c.Query("embed_token"))
+}
+
+func embedAuditOrigin(access *service.EmbedAccess) service.AuditOrigin {
+	if access == nil || access.EmbedSession == nil {
+		return service.AuditOrigin{}
+	}
+	return service.AuditOrigin{
+		Source:           service.AuditSourceEmbed,
+		EmbedAppID:       access.EmbedSession.AppID,
+		EmbedSessionID:   access.EmbedSession.ID,
+		ExternalUserID:   access.EmbedSession.ExternalUserID,
+		ExternalUserName: access.EmbedSession.ExternalUserName,
+		SessionKey:       access.EmbedSession.SessionKey,
+	}
 }
 
 func writeEmbedError(c *gin.Context, err error) {

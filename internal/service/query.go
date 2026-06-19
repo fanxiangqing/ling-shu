@@ -62,6 +62,7 @@ type ExecuteSQLInput struct {
 	RequestID    string
 	IP           string
 	UserAgent    string
+	AuditOrigin  AuditOrigin
 }
 
 type QueryHistoryInput struct {
@@ -689,6 +690,7 @@ func (s *QueryService) recordQueryExecutionAudit(ctx context.Context, execution 
 	if execution.ErrorMessage != "" {
 		payload["error_message"] = execution.ErrorMessage
 	}
+	addAuditOriginPayload(payload, input.AuditOrigin)
 	s.recordAudit(ctx, auditpkg.Event{
 		TenantID:     execution.TenantID,
 		ProjectID:    execution.ProjectID,

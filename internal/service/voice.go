@@ -43,6 +43,7 @@ type VoiceChatInput struct {
 	RequestID             string
 	IP                    string
 	UserAgent             string
+	AuditOrigin           AuditOrigin
 }
 
 type RealtimeVoiceChatInput struct {
@@ -60,6 +61,7 @@ type RealtimeVoiceChatInput struct {
 	RequestID             string
 	IP                    string
 	UserAgent             string
+	AuditOrigin           AuditOrigin
 }
 
 type VoiceChatResult struct {
@@ -148,6 +150,7 @@ func (s *VoiceService) Chat(ctx context.Context, input VoiceChatInput) (*VoiceCh
 		RequestID:             input.RequestID,
 		IP:                    input.IP,
 		UserAgent:             input.UserAgent,
+		AuditOrigin:           input.AuditOrigin,
 	})
 	if err != nil {
 		s.logger.Error("voice chat question failed",
@@ -258,6 +261,7 @@ func (s *VoiceService) StreamChat(ctx context.Context, input VoiceChatInput, emi
 		RequestID:             input.RequestID,
 		IP:                    input.IP,
 		UserAgent:             input.UserAgent,
+		AuditOrigin:           input.AuditOrigin,
 	}, func(event query.AgentEvent) error {
 		return emit(VoiceChatStreamEvent{Stage: VoiceStreamStageChat, Agent: &event})
 	})
@@ -370,6 +374,7 @@ func (s *VoiceService) StreamRealtimeChat(ctx context.Context, input RealtimeVoi
 		RequestID:             input.RequestID,
 		IP:                    input.IP,
 		UserAgent:             input.UserAgent,
+		AuditOrigin:           input.AuditOrigin,
 	}, func(event query.AgentEvent) error {
 		return emit(VoiceChatStreamEvent{Stage: VoiceStreamStageChat, Agent: &event})
 	})

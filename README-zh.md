@@ -26,7 +26,9 @@ Ling-Shu 是一个企业级 ChatBI / Text2SQL / VoiceBI 平台。用户可以用
 
 ![业务知识与 RAG](docs/images/business-knowledge-rag.png)
 
-![审计日志](docs/images/audit-log.png)
+![审计操作日志](docs/images/audit-operation-logs.png)
+
+![审计查询记录](docs/images/audit-query-records.png)
 
 ## 核心能力
 

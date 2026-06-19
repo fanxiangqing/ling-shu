@@ -95,6 +95,13 @@ func TestQueryServiceExecuteSQLRunsReviewedSelect(t *testing.T) {
 		SQL:          "select id, amount from orders",
 		MaxRows:      1,
 		RequestID:    "rid-1",
+		AuditOrigin: AuditOrigin{
+			Source:         AuditSourceEmbed,
+			EmbedAppID:     "emb_test",
+			EmbedSessionID: 11,
+			ExternalUserID: "u-1",
+			SessionKey:     "dashboard:123",
+		},
 	})
 	if err != nil {
 		t.Fatalf("execute sql: %v", err)
@@ -140,6 +147,10 @@ func TestQueryServiceExecuteSQLRunsReviewedSelect(t *testing.T) {
 	}
 	if auditRecorder.events[0].EventType != auditpkg.EventQueryExecute || auditRecorder.events[0].ResourceID != result.Execution.ID || auditRecorder.events[0].RequestID != "rid-1" {
 		t.Fatalf("unexpected audit event: %+v", auditRecorder.events[0])
+	}
+	payload := auditRecorder.events[0].Payload
+	if payload["source"] != AuditSourceEmbed || payload["app_id"] != "emb_test" || payload["embed_app_id"] != "emb_test" || payload["embed_session_id"] != uint64(11) || payload["external_user_id"] != "u-1" || payload["session_key"] != "dashboard:123" {
+		t.Fatalf("unexpected embed audit payload: %+v", payload)
 	}
 }
 

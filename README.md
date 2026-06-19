@@ -26,7 +26,9 @@ The backend keeps the core analytics flow clear and modular: project management,
 
 ![Business knowledge and RAG](docs/images/business-knowledge-rag.png)
 
-![Audit log](docs/images/audit-log.png)
+![Audit operation logs](docs/images/audit-operation-logs.png)
+
+![Audit query records](docs/images/audit-query-records.png)
 
 ## Highlights
 

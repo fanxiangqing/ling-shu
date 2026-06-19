@@ -100,6 +100,7 @@ type SendChatMessageInput struct {
 	RequestID             string
 	IP                    string
 	UserAgent             string
+	AuditOrigin           AuditOrigin
 }
 
 type ResultSynthesisInput struct {
@@ -604,6 +605,10 @@ func (s *ChatService) runAgentLoop(ctx context.Context, input SendChatMessageInp
 			Question:     content,
 			SQL:          result.SQL,
 			MaxRows:      input.MaxRows,
+			RequestID:    input.RequestID,
+			IP:           input.IP,
+			UserAgent:    input.UserAgent,
+			AuditOrigin:  input.AuditOrigin,
 		})
 		execution = runResult
 		if err == nil {
@@ -728,6 +733,10 @@ func (s *ChatService) executeSQLTasks(ctx context.Context, input SendChatMessage
 			Question:     question,
 			SQL:          task.SQL,
 			MaxRows:      input.MaxRows,
+			RequestID:    input.RequestID,
+			IP:           input.IP,
+			UserAgent:    input.UserAgent,
+			AuditOrigin:  input.AuditOrigin,
 		})
 		if err != nil {
 			failed := normalizeFailedExecution(runResult, err)
@@ -1377,6 +1386,7 @@ func (s *ChatService) recordChatAudit(ctx context.Context, input SendChatMessage
 	if agentResult != nil && len(agentResult.SQLTasks) > 0 {
 		payload["agent_sql_task_count"] = len(agentResult.SQLTasks)
 	}
+	addAuditOriginPayload(payload, input.AuditOrigin)
 	_ = s.auditRecorder.Record(ctx, auditpkg.Event{
 		TenantID:     input.TenantID,
 		ProjectID:    input.ProjectID,
