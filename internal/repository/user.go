@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"ling-shu/internal/model"
 
 	"gorm.io/gorm"
 )
+
+const embedSubjectPasswordHashPrefix = "embed-subject:"
 
 type UserRepository interface {
 	Create(ctx context.Context, user *model.User) error
@@ -262,7 +265,8 @@ func (r *GormUserRepository) ListTenantMembers(ctx context.Context, tenantID uin
 		Joins("JOIN users ON users.id = tenant_members.user_id").
 		Where("tenant_members.tenant_id = ?", tenantID).
 		Where("tenant_members.deleted_at IS NULL").
-		Where("users.deleted_at IS NULL")
+		Where("users.deleted_at IS NULL").
+		Where("users.password_hash NOT LIKE ?", embedSubjectPasswordHashPrefix+"%")
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -367,7 +371,8 @@ func (r *GormUserRepository) ListProjectMembers(ctx context.Context, tenantID ui
 		Where("project_members.tenant_id = ? AND project_members.project_id = ?", tenantID, projectID).
 		Where("project_members.deleted_at IS NULL").
 		Where("tenant_members.deleted_at IS NULL").
-		Where("users.deleted_at IS NULL")
+		Where("users.deleted_at IS NULL").
+		Where("users.password_hash NOT LIKE ?", embedSubjectPasswordHashPrefix+"%")
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -381,6 +386,10 @@ func (r *GormUserRepository) ListProjectMembers(ctx context.Context, tenantID ui
 		return nil, 0, err
 	}
 	return rows, total, nil
+}
+
+func IsEmbedSubjectPasswordHash(value string) bool {
+	return strings.HasPrefix(value, embedSubjectPasswordHashPrefix)
 }
 
 func (r *GormUserRepository) IsProjectPrimaryAdminMember(ctx context.Context, tenantID uint64, projectID uint64, memberID uint64) (bool, error) {

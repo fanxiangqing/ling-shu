@@ -187,6 +187,52 @@ func TestAuthServiceManagesMembers(t *testing.T) {
 	}
 }
 
+func TestAuthServiceListMembersFiltersEmbedSubjects(t *testing.T) {
+	repo := &authFakeUserRepository{
+		users: []model.User{
+			{
+				BaseModel:    model.BaseModel{ID: 7},
+				Username:     "analyst",
+				DisplayName:  "数据分析师",
+				PasswordHash: "hashed-password",
+				Status:       "active",
+			},
+			{
+				BaseModel:    model.BaseModel{ID: 8},
+				Username:     "embed_emb_app_abc",
+				DisplayName:  "三方系统测试用户",
+				PasswordHash: "embed-subject:abcdef",
+				Status:       "active",
+			},
+		},
+		tenantMembers: []model.TenantMember{
+			{BaseModel: model.BaseModel{ID: 1}, TenantID: 1, UserID: 7, Status: "active"},
+			{BaseModel: model.BaseModel{ID: 2}, TenantID: 1, UserID: 8, Status: "active"},
+		},
+		projectMembers: []model.ProjectMember{
+			{BaseModel: model.BaseModel{ID: 1}, TenantID: 1, ProjectID: 2, UserID: 7, Status: "active"},
+			{BaseModel: model.BaseModel{ID: 2}, TenantID: 1, ProjectID: 2, UserID: 8, Status: "active"},
+		},
+	}
+	service := NewAuthService(repo, authpkg.NewTokenManager("secret", time.Hour))
+
+	tenantMembers, err := service.ListTenantMembers(context.Background(), 1, 1, 20)
+	if err != nil {
+		t.Fatalf("list tenant members: %v", err)
+	}
+	if tenantMembers.Total != 1 || tenantMembers.Items[0].UserID != 7 {
+		t.Fatalf("expected only regular tenant member, got %+v", tenantMembers)
+	}
+
+	projectMembers, err := service.ListProjectMembers(context.Background(), 1, 2, 1, 20)
+	if err != nil {
+		t.Fatalf("list project members: %v", err)
+	}
+	if projectMembers.Total != 1 || projectMembers.Items[0].UserID != 7 {
+		t.Fatalf("expected only regular project member, got %+v", projectMembers)
+	}
+}
+
 func TestAuthServiceProtectsPrimaryAdminMember(t *testing.T) {
 	repo := &authFakeUserRepository{}
 	service := NewAuthService(repo, authpkg.NewTokenManager("secret", time.Hour), WithSignupWorkspace("tenant_admin"))
@@ -363,12 +409,16 @@ func (r *authFakeUserRepository) ListTenantMembers(ctx context.Context, tenantID
 	var rows []repository.MemberRow
 	for _, member := range r.tenantMembers {
 		if member.TenantID == tenantID && !member.DeletedAt.Valid {
+			user := r.fakeUser(member.UserID)
+			if user != nil && repository.IsEmbedSubjectPasswordHash(user.PasswordHash) {
+				continue
+			}
 			rows = append(rows, repository.MemberRow{
 				ID:          member.ID,
 				TenantID:    member.TenantID,
 				UserID:      member.UserID,
-				Username:    "alice",
-				DisplayName: "Alice",
+				Username:    fakeMemberUsername(user),
+				DisplayName: fakeMemberDisplayName(user),
 				Status:      member.Status,
 			})
 		}
@@ -435,18 +485,45 @@ func (r *authFakeUserRepository) ListProjectMembers(ctx context.Context, tenantI
 	var rows []repository.MemberRow
 	for _, member := range r.projectMembers {
 		if member.TenantID == tenantID && member.ProjectID == projectID && !member.DeletedAt.Valid {
+			user := r.fakeUser(member.UserID)
+			if user != nil && repository.IsEmbedSubjectPasswordHash(user.PasswordHash) {
+				continue
+			}
 			rows = append(rows, repository.MemberRow{
 				ID:          member.ID,
 				TenantID:    member.TenantID,
 				ProjectID:   member.ProjectID,
 				UserID:      member.UserID,
-				Username:    "alice",
-				DisplayName: "Alice",
+				Username:    fakeMemberUsername(user),
+				DisplayName: fakeMemberDisplayName(user),
 				Status:      member.Status,
 			})
 		}
 	}
 	return rows, int64(len(rows)), nil
+}
+
+func (r *authFakeUserRepository) fakeUser(userID uint64) *model.User {
+	for idx := range r.users {
+		if r.users[idx].ID == userID {
+			return &r.users[idx]
+		}
+	}
+	return nil
+}
+
+func fakeMemberUsername(user *model.User) string {
+	if user == nil || user.Username == "" {
+		return "alice"
+	}
+	return user.Username
+}
+
+func fakeMemberDisplayName(user *model.User) string {
+	if user == nil || user.DisplayName == "" {
+		return "Alice"
+	}
+	return user.DisplayName
 }
 
 func (r *authFakeUserRepository) IsProjectPrimaryAdminMember(ctx context.Context, tenantID uint64, projectID uint64, memberID uint64) (bool, error) {
