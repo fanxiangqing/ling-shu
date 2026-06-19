@@ -134,7 +134,9 @@ pkg/               Shared packages
   secret/          Secret encryption codec
 prompts/           Prompt templates
 scripts/mysql/     MySQL schema scripts
-deploy/            Kubernetes manifests
+deploy/            Deployment manifests
+  docker/          Docker Compose full-stack deployment
+  k8s/             Kubernetes manifests
 ```
 
 ## Configuration

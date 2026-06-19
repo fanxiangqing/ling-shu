@@ -134,7 +134,9 @@ pkg/               公共包
   secret/          密钥加解密
 prompts/           Prompt 模板
 scripts/mysql/     MySQL 初始化脚本
-deploy/            Kubernetes 配置
+deploy/            部署配置
+  docker/          Docker Compose 全栈部署
+  k8s/             Kubernetes 配置
 ```
 
 ## 配置
