@@ -9,10 +9,12 @@ const UNAUTHORIZED_CODE = 40100
 
 type RequestOptions = Omit<AxiosRequestConfig, 'baseURL' | 'data' | 'url'> & {
   body?: unknown
+  skipAuthHeader?: boolean
   skipUnauthorizedRedirect?: boolean
 }
 
 type ApiRequestConfig = AxiosRequestConfig & {
+  skipAuthHeader?: boolean
   skipUnauthorizedRedirect?: boolean
 }
 
@@ -62,6 +64,10 @@ export function friendlyErrorMessage(message: string, status = 0) {
     'missing bearer token': '请先登录后再操作',
     'invalid bearer token': '登录状态已失效，请重新登录',
     'invalid authorization header': '登录凭证格式不正确，请重新登录',
+    'embed token invalid': '内嵌 Token 已失效或不匹配，请重新签发 Token',
+    'embed origin denied': '当前页面来源不在允许嵌入来源中，请检查内嵌应用配置',
+    'embed app disabled': '内嵌应用已停用，请先启用后再使用',
+    'embed app secret invalid': 'App Secret 不正确，请重新查看 Secret 后再试',
     'authentication is required': '请先登录后再操作',
     'permission checker is not configured': '权限服务未配置，请联系管理员',
     'permission denied': '没有权限执行该操作',
@@ -127,7 +133,8 @@ export const apiClient = axios.create({
 apiClient.interceptors.request.use((config) => {
   const headers = AxiosHeaders.from(config.headers)
   const token = getToken()
-  if (token) {
+  const requestConfig = config as ApiRequestConfig
+  if (token && !requestConfig.skipAuthHeader && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`)
   }
   config.headers = headers

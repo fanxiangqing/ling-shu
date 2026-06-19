@@ -392,6 +392,68 @@ export interface ProviderSummary {
   tts: ProviderInfo
 }
 
+export interface EmbedAppRecord extends BaseRecord {
+  tenant_id: number
+  project_id: number
+  app_id: string
+  name: string
+  allowed_origins_json?: string
+  session_policy: 'user' | 'context' | 'new'
+  launcher_title: string
+  welcome_message?: string
+  status?: 'active' | 'disabled' | string
+}
+
+export interface EmbedAppCreateResult {
+  app: EmbedAppRecord
+  app_secret: string
+}
+
+export interface EmbedAppSecretResult {
+  app_id: string
+  app_secret: string
+}
+
+export interface EmbedTokenResult {
+  access_token: string
+  token_type: string
+  expires_at: string
+}
+
+export interface EmbedDatasourceRecord {
+  id: number
+  name: string
+  db_type: string
+  status?: string
+  synced_at?: string
+}
+
+export interface EmbedBootstrapResult {
+  app: {
+    app_id: string
+    name: string
+    launcher_title: string
+    welcome_message?: string
+    session_policy: string
+    allowed_origins?: string[]
+  }
+  tenant_id: number
+  project_id: number
+  user_id: number
+  session_id: number
+  session_key: string
+  datasources: EmbedDatasourceRecord[]
+  capabilities: {
+    asr: boolean
+    tts: boolean
+    realtime_voice: boolean
+  }
+  identity: {
+    external_user_id: string
+    external_user_name?: string
+  }
+}
+
 export interface RoleRecord {
   code: string
   name: string

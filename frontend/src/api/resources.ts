@@ -10,6 +10,11 @@ import type {
   ChatMessageRecord,
   ChatSessionRecord,
   DataSourceRecord,
+  EmbedAppCreateResult,
+  EmbedAppRecord,
+  EmbedAppSecretResult,
+  EmbedTokenResult,
+  EmbedBootstrapResult,
   KBMetricRecord,
   KBTermRecord,
   KBFewShotRecord,
@@ -138,6 +143,71 @@ export const projectApi = {
     return request<Record<string, unknown>>(`/projects/${projectId}/chat/sessions`, {
       method: 'POST',
       body: jsonBody(payload)
+    })
+  }
+}
+
+export const embedApi = {
+  listApps(projectId: number, tenantId: number, params: PageParams = {}) {
+    return request<PageResult<EmbedAppRecord>>(
+      `/projects/${projectId}/embed/apps${queryString({ tenant_id: tenantId, ...params })}`
+    )
+  },
+  createApp(projectId: number, payload: {
+    tenant_id: number
+    name?: string
+    allowed_origins?: string[]
+    session_policy?: string
+    launcher_title?: string
+    welcome_message?: string
+  }) {
+    return request<EmbedAppCreateResult>(`/projects/${projectId}/embed/apps`, {
+      method: 'POST',
+      body: jsonBody(payload)
+    })
+  },
+  revealAppSecret(projectId: number, appId: number, tenantId: number) {
+    return request<EmbedAppSecretResult>(
+      `/projects/${projectId}/embed/apps/${appId}/secret${queryString({ tenant_id: tenantId })}`
+    )
+  },
+  updateAppStatus(projectId: number, appId: number, tenantId: number, status: 'active' | 'disabled') {
+    return request<EmbedAppRecord>(`/projects/${projectId}/embed/apps/${appId}/status${queryString({ tenant_id: tenantId })}`, {
+      method: 'PATCH',
+      body: jsonBody({ tenant_id: tenantId, status })
+    })
+  },
+  deleteApp(projectId: number, appId: number, tenantId: number) {
+    return request<{ status: string }>(`/projects/${projectId}/embed/apps/${appId}${queryString({ tenant_id: tenantId })}`, {
+      method: 'DELETE'
+    })
+  },
+  createToken(payload: {
+    app_id: string
+    app_secret: string
+    external_user_id: string
+    external_user_name?: string
+    ttl_seconds?: number
+  }) {
+    return request<EmbedTokenResult>('/embed/token', {
+      method: 'POST',
+      body: jsonBody(payload),
+      skipAuthHeader: true,
+      skipUnauthorizedRedirect: true
+    })
+  },
+  bootstrap(payload: {
+    app_id: string
+    access_token: string
+    key?: string
+    session_mode?: string
+    parent_origin?: string
+  }) {
+    return request<EmbedBootstrapResult>('/embed/bootstrap', {
+      method: 'POST',
+      body: jsonBody(payload),
+      skipAuthHeader: true,
+      skipUnauthorizedRedirect: true
     })
   }
 }

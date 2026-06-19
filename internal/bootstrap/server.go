@@ -106,6 +106,7 @@ type repositories struct {
 	knowledge      repository.KnowledgeRepository
 	rag            repository.RAGRepository
 	audit          repository.AuditRepository
+	embed          repository.EmbedRepository
 }
 
 func newRepositories(db *gorm.DB) repositories {
@@ -122,6 +123,7 @@ func newRepositories(db *gorm.DB) repositories {
 		knowledge:      repository.NewKnowledgeRepository(db),
 		rag:            repository.NewRAGRepository(db),
 		audit:          repository.NewAuditRepository(db),
+		embed:          repository.NewEmbedRepository(db),
 	}
 }
 
@@ -162,6 +164,7 @@ type services struct {
 	chat           *service.ChatService
 	voice          *service.VoiceService
 	knowledge      *service.KnowledgeService
+	embed          *service.EmbedService
 	vectorStore    rag.VectorStore
 }
 
@@ -241,6 +244,7 @@ func newServices(ctx context.Context, cfg *config.Config, logger *zap.Logger, db
 	chatService.SetAgentContextBuilder(agentContextBuilder)
 	chatService.SetAuditRecorder(auditService)
 	voiceService := service.NewVoiceService(providerService, chatService)
+	embedService := service.NewEmbedService(repos.embed, repos.datasource, providerService, cfg.Auth.JWTSecret, dsnCodec)
 
 	out := services{
 		tokenManager:   tokenManager,
@@ -259,6 +263,7 @@ func newServices(ctx context.Context, cfg *config.Config, logger *zap.Logger, db
 		chat:           chatService,
 		voice:          voiceService,
 		knowledge:      knowledgeService,
+		embed:          embedService,
 		vectorStore:    vectorStore,
 	}
 	out.attachLogger(logger)
@@ -280,6 +285,7 @@ func (s services) attachLogger(logger *zap.Logger) {
 	s.rag.SetLogger(logger)
 	s.chat.SetLogger(logger)
 	s.voice.SetLogger(logger)
+	s.embed.SetLogger(logger)
 }
 
 func newVectorStore(ctx context.Context, cfg *config.Config) (rag.VectorStore, error) {
@@ -315,6 +321,7 @@ type handlers struct {
 	query          *handler.QueryHandler
 	queryAgent     *handler.QueryAgentHandler
 	audit          *handler.AuditHandler
+	embed          *handler.EmbedHandler
 }
 
 func newHandlers(services services) handlers {
@@ -334,6 +341,7 @@ func newHandlers(services services) handlers {
 		query:          handler.NewQueryHandler(services.query),
 		queryAgent:     handler.NewQueryAgentHandler(services.queryAgent),
 		audit:          handler.NewAuditHandler(services.audit, services.query),
+		embed:          handler.NewEmbedHandler(services.embed, services.chat, services.voice),
 	}
 }
 
@@ -361,6 +369,7 @@ func newRouterDependencies(cfg *config.Config, logger *zap.Logger, services serv
 		QueryHandler:          handlers.query,
 		QueryAgentHandler:     handlers.queryAgent,
 		AuditHandler:          handlers.audit,
+		EmbedHandler:          handlers.embed,
 	}
 }
 

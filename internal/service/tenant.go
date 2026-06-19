@@ -21,6 +21,10 @@ var (
 	ErrQueryAlreadyRunning = errors.New("same query is already running")
 	ErrSecretEncryptFailed = errors.New("secret encrypt failed")
 	ErrSecretDecryptFailed = errors.New("secret decrypt failed")
+	ErrEmbedSecretInvalid  = errors.New("embed app secret invalid")
+	ErrEmbedTokenInvalid   = errors.New("embed token invalid")
+	ErrEmbedOriginDenied   = errors.New("embed origin denied")
+	ErrEmbedAppDisabled    = errors.New("embed app disabled")
 )
 
 type TenantService struct {

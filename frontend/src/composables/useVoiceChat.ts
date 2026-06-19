@@ -128,7 +128,7 @@ export function useVoiceChat() {
       project_id: ws.context.projectId,
       user_id: ws.context.userId,
       selected_datasource_ids: project.projectDatasources.items.map((item) => item.id),
-      auto_execute: chat.autoExecute,
+      auto_execute: true,
       max_rows: chat.maxRows
     }, {
       onOpen: () => {

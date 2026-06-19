@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { NConfigProvider, NGlobalStyle, NMessageProvider, type GlobalThemeOverrides } from 'naive-ui'
 import AuthPanel from '@/components/AuthPanel.vue'
 import ManagementConsole from '@/components/ManagementConsole.vue'
+import EmbedChatApp from '@/components/embed/EmbedChatApp.vue'
 import { LOGIN_KEY, UNAUTHORIZED_EVENT, clearAuthState } from '@/api/client'
 import type { LoginResult } from '@/types/domain'
 
@@ -37,6 +38,7 @@ const themeOverrides: GlobalThemeOverrides = {
 }
 
 const login = ref<LoginResult | null>(readLogin())
+const isEmbedMode = window.location.pathname.startsWith('/embed/')
 
 function readLogin() {
   const raw = localStorage.getItem(LOGIN_KEY)
@@ -75,7 +77,8 @@ onBeforeUnmount(() => {
   <NConfigProvider :theme-overrides="themeOverrides">
     <NMessageProvider>
       <NGlobalStyle />
-      <AuthPanel v-if="!login" @login="onLogin" />
+      <EmbedChatApp v-if="isEmbedMode" />
+      <AuthPanel v-else-if="!login" @login="onLogin" />
       <ManagementConsole v-else :login="login" @logout="onLogout" />
     </NMessageProvider>
   </NConfigProvider>

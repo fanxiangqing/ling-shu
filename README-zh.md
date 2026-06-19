@@ -38,6 +38,7 @@ Ling-Shu 是一个企业级 ChatBI / Text2SQL / VoiceBI 平台。用户可以用
 - 业务知识 RAG：业务术语、指标口径、FewShot SQL。
 - LLM / ASR / TTS Provider 化，目前重点适配阿里云。
 - VoiceBI：流式 ASR 输入和流式 TTS 播放。
+- 第三方系统内嵌：项目可创建 Embed App，第三方页面通过轻量 JS SDK 出现悬浮机器人，并在弹窗 iframe 中完成文本问数和项目级 ASR/TTS 语音交互。
 - RBAC 权限角色：SuperAdmin、TenantAdmin、ProjectAdmin、Analyst、Viewer；组织/项目成员支持启用、停用和移除，主管理员受保护。
 - Vue 3 + TypeScript + Naive UI 前端管理台。
 
@@ -162,6 +163,61 @@ export LING_SHU_ALIYUN_NLS_APP_KEY="your-nls-app-key"
 
 ASR 和 TTS 是可选能力。TTS 未启用时，语音问数仍会返回转写文本和 ChatBI 结果，只是不生成播报音频。
 
+## 第三方系统内嵌
+
+项目管理页的项目卡片提供“内嵌”入口。创建内嵌应用后，系统会返回：
+
+- `app_id`：公开应用 ID，可放在第三方前端。
+- `app_secret`：应用密钥，会加密保存在 Ling-Shu 服务端，可在项目管理权限下随时查看；第三方系统仍应只保存在后端，不能下发到浏览器。
+- SDK 集成代码：第三方页面加载 `sdk/ling-shu-embed.js` 后，会自动出现带内置图标的悬浮机器人，点击后打开适合问数结果展示的对话弹窗。
+
+内嵌应用列表支持复制 `app_id`、查看/复制 `App Secret`、启用、停用和删除。停用后不能再签发新的内嵌 Token，已有嵌入会话也会在下一次请求时失效；删除会软删除应用并关闭相关活跃内嵌会话，原 `app_id` 不再可用。
+
+列表里的“集成测试”会自动签发测试 Token，并在控制台内以接近全屏的方式模拟第三方系统页面加载正式 JS SDK；可以提前验证小机器人入口、弹窗 iframe、会话策略、允许来源以及项目级 ASR/TTS 是否可用。
+
+前端集成示例：
+
+```html
+<script src="https://lingshu.example.com/sdk/ling-shu-embed.js"></script>
+<script>
+  LingShuEmbed.init({
+    appId: "emb_xxx",
+    key: "dashboard:123",
+    position: "bottom-right",
+    launcher: { title: "智能问数" },
+    tokenProvider: () => fetch("/api/lingshu/embed-token").then((res) => res.json())
+  })
+</script>
+```
+
+SDK 默认以右下角悬浮按钮启动，桌面端弹窗会预留更多空间展示表格、SQL 和语音交互结果；移动端会自动贴近全屏展示。`position` 可设置为 `bottom-right`、`bottom-left`、`top-right` 或 `top-left`，`launcher.title` 可覆盖悬浮按钮文案。
+
+`tokenProvider` 调用的是第三方系统自己的后端接口。第三方后端基于当前登录态拿到用户身份，再调用 Ling-Shu 签发短期内嵌 Token：
+
+```js
+await fetch("https://lingshu.example.com/api/v1/embed/token", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    app_id: "emb_xxx",
+    app_secret: process.env.LINGSHU_EMBED_SECRET,
+    external_user_id: currentUser.id,
+    external_user_name: currentUser.name,
+    ttl_seconds: 3600
+  })
+})
+```
+
+`external_user_id` 和 `external_user_name` 都来自第三方系统自己的用户体系，例如员工号、会员 ID、用户昵称或姓名。公开未登录页面也可以由第三方后端生成匿名访客 ID，并通过第三方 cookie/session 保持稳定。Ling-Shu 不要求第三方用户登录 Ling-Shu，也不会把后台管理 token 暴露给 SDK。
+
+会话隔离由内嵌应用的会话策略决定：
+
+- **按用户复用（`user`）**：同一个 `app_id + external_user_id` 始终进入同一个默认会话，SDK 传入的 `key` 会被忽略。适合“我的数据助手”“个人经营助手”这类长期个人上下文。
+- **按业务上下文复用（`context`）**：同一个 `app_id + external_user_id + key` 复用一个会话。`key` 由第三方页面传入，例如 `dashboard:123`、`customer:456`、`order:789`。适合看板、客户详情、订单详情等业务页面，这是默认推荐策略。
+- **每次新会话（`new`）**：每次 iframe bootstrap 都创建新会话，即使用户和 `key` 相同也不会复用。适合演示、临时分析、一次性问答或不希望保留上下文的场景。
+
+如果项目配置了 ASR/TTS，`/embed/bootstrap` 会返回能力开关，嵌入页会自动显示语音输入并播放 TTS 音频；未配置时 SDK 会隐藏语音入口。SDK 创建的 iframe 会带上 `allow="microphone; autoplay"`，以支持浏览器麦克风和自动播放授权。
+
 ## 快速启动
 
 ### Docker Compose
@@ -175,6 +231,8 @@ docker compose up --build
 ```text
 scripts/mysql/001_init_schema.sql
 ```
+
+该初始化脚本已包含第三方内嵌所需的 `embed_apps` 和 `embed_sessions` 表。已有数据库升级时按编号执行增量脚本，本次内嵌能力需要执行 `scripts/mysql/007_embed_apps.sql`，它会同时补齐加密保存 `App Secret` 的字段。
 
 Milvus 单独启动：
 
@@ -275,6 +333,7 @@ sequenceDiagram
 - `/projects/*` 项目、项目成员授权、Provider 配置、知识库、RAG
 - `/datasources/*` 数据源测试、元数据同步、元数据预览
 - `/chat/*` 会话、消息、消息流式接口、实时语音接口
+- `/embed/*` 第三方内嵌 Token、Bootstrap、嵌入会话消息和实时语音接口
 - `/query/*` SQL 审核、执行和历史
 - `/providers/*` LLM / ASR / TTS Provider 工具接口
 - `/audit/*` 审计日志和查询执行记录

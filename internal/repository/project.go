@@ -162,6 +162,8 @@ func (r *GormProjectRepository) Delete(ctx context.Context, tenantID uint64, pro
 			&model.QueryExecution{},
 			&model.ChatMessage{},
 			&model.ChatSession{},
+			&model.EmbedSession{},
+			&model.EmbedApp{},
 			&model.MetadataColumn{},
 			&model.MetadataTable{},
 			&model.MetadataSchema{},

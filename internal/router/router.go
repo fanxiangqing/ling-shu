@@ -33,6 +33,7 @@ type Dependencies struct {
 	QueryHandler          *handler.QueryHandler
 	QueryAgentHandler     *handler.QueryAgentHandler
 	AuditHandler          *handler.AuditHandler
+	EmbedHandler          *handler.EmbedHandler
 }
 
 func New(deps Dependencies) *gin.Engine {
@@ -131,6 +132,11 @@ func New(deps Dependencies) *gin.Engine {
 			projects.DELETE("/:project_id/kb/fewshots/:id", append(authz("kb.manage", middleware.RequireProjectScope()), deps.KnowledgeHandler.DeleteFewShot)...)
 			projects.POST("/:project_id/rag/rebuild", append(authz("kb.manage", middleware.RequireProjectScope()), deps.RAGHandler.Rebuild)...)
 			projects.POST("/:project_id/rag/search", append(authz("chat.use", middleware.RequireProjectScope()), deps.RAGHandler.Search)...)
+			projects.GET("/:project_id/embed/apps", append(authz("project.manage", middleware.RequireProjectScope()), deps.EmbedHandler.ListApps)...)
+			projects.POST("/:project_id/embed/apps", append(authz("project.manage", middleware.RequireProjectScope()), deps.EmbedHandler.CreateApp)...)
+			projects.GET("/:project_id/embed/apps/:app_id/secret", append(authz("project.manage", middleware.RequireProjectScope()), deps.EmbedHandler.RevealAppSecret)...)
+			projects.PATCH("/:project_id/embed/apps/:app_id/status", append(authz("project.manage", middleware.RequireProjectScope()), deps.EmbedHandler.UpdateAppStatus)...)
+			projects.DELETE("/:project_id/embed/apps/:app_id", append(authz("project.manage", middleware.RequireProjectScope()), deps.EmbedHandler.DeleteApp)...)
 		}
 
 		datasources := v1.Group("/datasources")
@@ -184,6 +190,15 @@ func New(deps Dependencies) *gin.Engine {
 		{
 			audit.GET("/logs", append(authz("audit.view", middleware.RequireTenantScope()), deps.AuditHandler.ListLogs)...)
 			audit.GET("/query-executions", append(authz("audit.view", middleware.RequireTenantScope()), deps.AuditHandler.QueryExecutions)...)
+		}
+
+		embed := v1.Group("/embed")
+		{
+			embed.POST("/token", deps.EmbedHandler.CreateToken)
+			embed.POST("/bootstrap", deps.EmbedHandler.Bootstrap)
+			embed.GET("/chat/sessions/:session_id/messages", deps.EmbedHandler.ListMessages)
+			embed.POST("/chat/sessions/:session_id/messages/stream", deps.EmbedHandler.StreamMessage)
+			embed.GET("/chat/sessions/:session_id/voice/realtime", deps.EmbedHandler.RealtimeVoice)
 		}
 	}
 

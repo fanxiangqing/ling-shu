@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NButton, NIcon, NPopconfirm, NTag } from 'naive-ui'
-import { Database, Trash2 } from '@lucide/vue'
+import { Code2, Database, Trash2 } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useProjectStore } from '@/stores/project'
@@ -13,6 +13,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: [id: number]
+  embed: [id: number]
 }>()
 
 const workspace = useWorkspaceStore()
@@ -61,6 +62,12 @@ const datasourceLabel = computed(() =>
         </NTag>
       </div>
       <div class="card-actions" @click.stop>
+        <NButton size="small" secondary @click="emit('embed', item.id)">
+          <template #icon>
+            <NIcon :component="Code2" />
+          </template>
+          内嵌
+        </NButton>
         <NPopconfirm @positive-click="projectStore.deleteProject(item)">
           <template #trigger>
             <NButton size="small" type="error" quaternary>

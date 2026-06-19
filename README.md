@@ -38,6 +38,7 @@ The backend keeps the core analytics flow clear and modular: project management,
 - RAG over business terms, metric definitions, and FewShot SQL examples.
 - Provider-based LLM, ASR, and TTS integrations. The current implementation focuses on Alibaba Cloud.
 - Realtime VoiceBI: streaming ASR input and streaming TTS playback.
+- Third-party embedding: each project can create Embed Apps; third-party pages load a small JS SDK that renders a floating bot and opens a modal iframe for ChatBI and project-scoped ASR/TTS.
 - RBAC roles for SuperAdmin, TenantAdmin, ProjectAdmin, Analyst, and Viewer; tenant/project members can be enabled, disabled, and removed, while the primary tenant admin is protected.
 - Vue 3 + TypeScript + Naive UI frontend.
 
@@ -162,6 +163,61 @@ export LING_SHU_ALIYUN_NLS_APP_KEY="your-nls-app-key"
 
 ASR and TTS are optional. If TTS is disabled, voice questions can still return transcript and ChatBI results, but no speech audio will be generated.
 
+## Third-Party Embedding
+
+The project cards in the web console include an **Embed** action. Creating an embed app returns:
+
+- `app_id`: public application ID, safe to use in third-party frontend code.
+- `app_secret`: application secret, encrypted at rest by Ling-Shu and revealable later to users with project management permission. Third-party systems should still store it only on their backend and never expose it to browsers.
+- SDK snippet: after the third-party page loads `sdk/ling-shu-embed.js`, a floating bot with a built-in icon appears and opens a ChatBI-friendly modal iframe when clicked.
+
+The embed app list supports copying `app_id`, revealing/copying `App Secret`, enabling, disabling, and deleting apps. Disabled apps can no longer issue new embed tokens, and existing embedded sessions fail on their next request. Deleted apps are soft-deleted, their active embed sessions are closed, and the old `app_id` can no longer be used.
+
+The **Integration Test** action signs a temporary test token and simulates a third-party page inside a near full-screen console modal with the real JS SDK. Use it to verify the floating bot, modal iframe, session policy, allowed origin, and project-scoped ASR/TTS before any third-party development work starts.
+
+Frontend integration example:
+
+```html
+<script src="https://lingshu.example.com/sdk/ling-shu-embed.js"></script>
+<script>
+  LingShuEmbed.init({
+    appId: "emb_xxx",
+    key: "dashboard:123",
+    position: "bottom-right",
+    launcher: { title: "Smart ChatBI" },
+    tokenProvider: () => fetch("/api/lingshu/embed-token").then((res) => res.json())
+  })
+</script>
+```
+
+The SDK defaults to a bottom-right floating launcher. The desktop modal leaves more room for tables, SQL, and voice interaction results; mobile layouts expand close to full-screen. `position` accepts `bottom-right`, `bottom-left`, `top-right`, or `top-left`, and `launcher.title` overrides the launcher label.
+
+`tokenProvider` should call the third-party system's own backend. That backend reads the current logged-in user and asks Ling-Shu for a short-lived embed token:
+
+```js
+await fetch("https://lingshu.example.com/api/v1/embed/token", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    app_id: "emb_xxx",
+    app_secret: process.env.LINGSHU_EMBED_SECRET,
+    external_user_id: currentUser.id,
+    external_user_name: currentUser.name,
+    ttl_seconds: 3600
+  })
+})
+```
+
+`external_user_id` and `external_user_name` come from the third-party system's own identity model, such as employee IDs, member IDs, nicknames, or display names. Public anonymous pages can generate a stable visitor ID on the third-party backend and keep it in that system's cookie/session. Third-party users do not need Ling-Shu accounts, and the SDK never receives Ling-Shu console tokens.
+
+Session isolation is controlled by the embed app's session policy:
+
+- **Reuse by user (`user`)**: the same `app_id + external_user_id` always enters one default session. The SDK `key` is ignored. This fits long-lived personal assistants such as "my data assistant".
+- **Reuse by business context (`context`)**: the same `app_id + external_user_id + key` reuses one session. The third-party page provides `key`, for example `dashboard:123`, `customer:456`, or `order:789`. This is the recommended default for dashboards and business detail pages.
+- **Always new (`new`)**: each iframe bootstrap creates a new session, even if the user and `key` are unchanged. This fits demos, temporary analysis, one-off Q&A, or cases where context should not persist.
+
+If the project has ASR/TTS configured, `/embed/bootstrap` returns capability flags and the embedded page automatically enables voice input and TTS playback. If voice providers are not configured, the microphone entry is hidden. The SDK iframe uses `allow="microphone; autoplay"` for browser microphone and playback permissions.
+
 ## Quick Start
 
 ### Docker Compose
@@ -175,6 +231,8 @@ The compose stack starts the API server, MySQL, and Redis. MySQL initializes fro
 ```text
 scripts/mysql/001_init_schema.sql
 ```
+
+This first-run schema already includes the `embed_apps` and `embed_sessions` tables required by third-party embedding. Existing databases should apply incremental scripts in numeric order; this feature requires `scripts/mysql/007_embed_apps.sql`, which also adds the encrypted `App Secret` column when needed.
 
 Milvus can be started separately:
 
@@ -265,6 +323,7 @@ Common modules:
 - `/projects/*` projects, project member authorization, provider config, knowledge, RAG
 - `/datasources/*` data source test, metadata sync, metadata preview
 - `/chat/*` sessions, messages, streaming message API, realtime voice API
+- `/embed/*` third-party embed token, bootstrap, embedded chat messages, and realtime voice APIs
 - `/query/*` SQL review, execution, and history
 - `/providers/*` LLM / ASR / TTS provider utilities
 - `/audit/*` audit logs and query execution records

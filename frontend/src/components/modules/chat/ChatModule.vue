@@ -21,7 +21,6 @@ const {
   sessionLoadingMore,
   chatProjectModalVisible,
   chatForm,
-  autoExecute,
   maxRows,
   chatDatasources
 } = storeToRefs(chat)
@@ -95,11 +94,12 @@ const { voiceRecording, voiceBusy } = voice
         :session-id="selectedSession.id"
         :project-name="selectedProject?.name || '未选择项目'"
         :session-title="selectedSession.title"
-        v-model:auto-execute="autoExecute"
+        :auto-execute="true"
         v-model:max-rows="maxRows"
         :loading="loading"
         :voice-recording="voiceRecording"
         :voice-busy="voiceBusy"
+        :voice-enabled="true"
         @ask="chat.ask"
         @voice-toggle="voice.toggleVoiceInput"
       />

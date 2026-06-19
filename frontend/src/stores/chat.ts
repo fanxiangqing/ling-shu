@@ -31,7 +31,6 @@ export const useChatStore = defineStore('chat', () => {
   const latestResult = ref<SendChatMessageResult | null>(null)
   const sessionLoadingMore = ref(false)
   const chatProjectModalVisible = ref(false)
-  const autoExecute = ref(true)
   const maxRows = ref(200)
 
   const chatForm = reactive({
@@ -195,7 +194,7 @@ export const useChatStore = defineStore('chat', () => {
       user_id: ws.context.userId,
       content: question,
       selected_datasource_ids: project.projectDatasources.items.map((item) => item.id),
-      auto_execute: autoExecute.value,
+      auto_execute: true,
       max_rows: maxRows.value
     }
     let result: SendChatMessageResult
@@ -252,7 +251,6 @@ export const useChatStore = defineStore('chat', () => {
     latestResult,
     sessionLoadingMore,
     chatProjectModalVisible,
-    autoExecute,
     maxRows,
     chatForm,
     visibleSessions,

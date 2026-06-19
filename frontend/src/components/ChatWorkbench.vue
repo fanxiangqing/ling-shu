@@ -7,7 +7,6 @@ import {
   NInput,
   NInputNumber,
   NScrollbar,
-  NSwitch,
   NTag,
   NTooltip
 } from 'naive-ui'
@@ -25,12 +24,14 @@ const props = defineProps<{
   loading: boolean
   voiceRecording?: boolean
   voiceBusy?: boolean
+  voiceEnabled?: boolean
+  assistantName?: string
+  welcomeMessage?: string
 }>()
 
 const emit = defineEmits<{
   ask: [question: string]
   'voice-toggle': []
-  'update:autoExecute': [value: boolean]
   'update:maxRows': [value: number]
 }>()
 
@@ -51,6 +52,8 @@ const activeSourceHint = computed(() => {
   if (props.datasources.length > 1) return props.datasources.map((source) => source.name).join('、')
   return activeSourceLabel.value
 })
+
+const assistantLabel = computed(() => props.assistantName || 'Ling-Shu')
 
 const textSendLoading = computed(() => props.loading && !props.voiceRecording && !props.voiceBusy)
 
@@ -451,13 +454,7 @@ function hasSQL(message: ChatMessage) {
           </template>
           {{ activeSourceHint }}
         </NTooltip>
-        <div class="switch-line">
-          <span>自动执行</span>
-          <NSwitch
-            :value="autoExecute"
-            @update:value="emit('update:autoExecute', $event)"
-          />
-        </div>
+        <NTag round type="success">自动执行已开启</NTag>
         <div class="limit-control" aria-label="结果行数上限">
           <span>结果上限</span>
           <NInputNumber
@@ -478,8 +475,8 @@ function hasSQL(message: ChatMessage) {
         <div class="bot-badge compact">
           <NIcon :component="Sparkles" />
         </div>
-        <h2>你好，我是 Ling-Shu</h2>
-        <p>当前项目是 {{ projectName }}。你可以直接提问业务指标、趋势、排名或明细。</p>
+        <h2>你好，我是 {{ assistantLabel }}</h2>
+        <p>{{ welcomeMessage || `当前项目是 ${projectName}。你可以直接提问业务指标、趋势、排名或明细。` }}</p>
       </div>
       <div v-else class="message-stack">
         <article
@@ -490,7 +487,7 @@ function hasSQL(message: ChatMessage) {
         >
           <div v-if="message.role === 'assistant'" class="message-label">
             <NIcon :component="Sparkles" />
-            Ling-Shu
+            {{ assistantLabel }}
             <NTag v-if="message.pending" size="small" round>运行中</NTag>
           </div>
           <p>{{ message.content }}</p>
@@ -679,7 +676,7 @@ function hasSQL(message: ChatMessage) {
           @keydown.enter.exact="handleEnter"
         />
         <div class="composer-actions">
-          <NTooltip trigger="hover">
+          <NTooltip v-if="voiceEnabled !== false" trigger="hover">
             <template #trigger>
               <NButton
                 circle

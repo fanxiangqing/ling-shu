@@ -8,6 +8,7 @@ import { useProjectStore } from '@/stores/project'
 import { pageSize, showPagination } from '@/utils/format'
 import ProjectCard from '@/components/modules/project/ProjectCard.vue'
 import ProjectDatasourceModal from '@/components/modules/project/ProjectDatasourceModal.vue'
+import ProjectEmbedModal from '@/components/modules/project/ProjectEmbedModal.vue'
 import ProjectFormModal from '@/components/modules/project/ProjectFormModal.vue'
 
 const workspace = useWorkspaceStore()
@@ -60,6 +61,7 @@ async function openProjectDatasources(id: number) {
           :key="project.id"
           :item="project"
           @select="openProjectDatasources"
+          @embed="projectStore.openEmbedModal"
         />
       </div>
       <div v-else class="empty-state compact">
@@ -81,5 +83,7 @@ async function openProjectDatasources(id: number) {
     <ProjectFormModal />
 
     <ProjectDatasourceModal />
+
+    <ProjectEmbedModal />
   </section>
 </template>
