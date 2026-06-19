@@ -249,6 +249,12 @@ textarea {
   height: 56px;
 }
 
+.auth-seal .brand-mark-svg {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+}
+
 .auth-panel {
   align-self: center;
   margin-right: 6vw;
@@ -320,10 +326,14 @@ textarea {
   width: 42px;
   height: 42px;
   place-items: center;
+  flex: 0 0 auto;
+}
+
+.brand-mark-svg {
+  display: block;
+  width: 42px;
+  height: 42px;
   border-radius: 8px;
-  background: #17211f;
-  color: #ffffff;
-  font-weight: 800;
 }
 
 .sidebar-toggle {
@@ -2700,11 +2710,6 @@ textarea {
   width: 44px;
   height: 44px;
   place-items: center;
-  border: 1px solid #17211f;
-  background: #17211f;
-  color: #ffffff;
-  font-weight: 800;
-  letter-spacing: 0;
 }
 
 .brand-name {

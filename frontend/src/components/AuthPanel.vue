@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { NButton, NForm, NFormItem, NInput, NTabPane, NTabs, useMessage } from 'naive-ui'
+import BrandMark from '@/components/common/BrandMark.vue'
 import { authApi } from '@/api/resources'
 import type { LoginResult } from '@/types/domain'
 
@@ -57,7 +58,9 @@ async function createUser() {
 <template>
   <main class="auth-screen">
     <section class="auth-copy">
-      <div class="seal auth-seal">LS</div>
+      <div class="seal auth-seal">
+        <BrandMark />
+      </div>
       <p class="eyebrow">Ling-Shu Console</p>
       <h1>企业自然语言问数工作台</h1>
       <p>

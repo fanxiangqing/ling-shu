@@ -2,6 +2,7 @@
 import { NButton, NIcon, NSelect } from 'naive-ui'
 import { ChevronLeft, ChevronRight, LogOut } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
+import BrandMark from '@/components/common/BrandMark.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useUiStore } from '@/stores/ui'
 import { useAuditStore } from '@/stores/audit'
@@ -63,7 +64,9 @@ function selectAuditSub(key: AuditSubKey) {
 <template>
   <aside class="workspace-sidebar">
     <div class="workspace-brand">
-      <div class="workspace-mark">灵</div>
+      <div class="workspace-mark">
+        <BrandMark />
+      </div>
       <div v-if="!sidebarCollapsed">
         <div class="brand-name">Ling-Shu</div>
         <div class="brand-sub">自然语言问数平台</div>
