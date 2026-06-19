@@ -46,17 +46,18 @@
       '.ls-launcher.bottom-left{left:24px;bottom:24px}',
       '.ls-launcher.top-right{right:24px;top:24px}',
       '.ls-launcher.top-left{left:24px;top:24px}',
+      '.ls-root.panel-open .ls-launcher{display:none}',
       '.ls-orb{width:42px;height:42px;border-radius:999px;display:grid;place-items:center;background:radial-gradient(circle at 32% 24%,#65e8bd,#24ba8c 58%,#0d7d60);color:#f7fffb;box-shadow:inset 0 0 0 1px rgba(255,255,255,.36),0 8px 18px rgba(30,180,134,.28)}',
       '.ls-orb svg{display:block;width:28px;height:28px;overflow:visible}',
       '.ls-icon-face,.ls-icon-stem,.ls-icon-ear,.ls-icon-chart{fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}',
       '.ls-icon-eye,.ls-icon-spark{fill:currentColor}',
       '.ls-label{white-space:nowrap}',
-      '.ls-panel{position:fixed;z-index:2147483001;width:min(520px,calc(100vw - 32px));height:min(760px,calc(100vh - 112px));border-radius:22px;overflow:hidden;background:#fbfaf6;box-shadow:0 30px 80px rgba(18,28,23,.3);border:1px solid rgba(12,45,31,.16);display:none}',
+      '.ls-panel{position:fixed;z-index:2147483001;width:min(520px,calc(100vw - 36px));height:min(960px,calc(100vh - 36px));border-radius:22px;overflow:hidden;background:#fbfaf6;box-shadow:0 30px 80px rgba(18,28,23,.3);border:1px solid rgba(12,45,31,.16);display:none}',
       '.ls-panel.open{display:block}',
-      '.ls-panel.bottom-right{right:24px;bottom:94px}',
-      '.ls-panel.bottom-left{left:24px;bottom:94px}',
-      '.ls-panel.top-right{right:24px;top:94px}',
-      '.ls-panel.top-left{left:24px;top:94px}',
+      '.ls-panel.bottom-right{right:18px;bottom:18px}',
+      '.ls-panel.bottom-left{left:18px;bottom:18px}',
+      '.ls-panel.top-right{right:18px;top:18px}',
+      '.ls-panel.top-left{left:18px;top:18px}',
       '.ls-frame{width:100%;height:100%;border:0;background:#fbfaf6}',
       '.ls-close{position:absolute;right:10px;top:10px;z-index:2;width:32px;height:32px;border:0;border-radius:999px;background:rgba(15,31,23,.08);color:#11231a;cursor:pointer;font:700 18px/1 inherit}',
       '.ls-loading{position:absolute;inset:0;display:grid;place-items:center;background:#fbfaf6;color:#44524a;font:700 14px/1.4 inherit}',
@@ -126,6 +127,7 @@
 
     async function open() {
       panel.classList.add('open')
+      root.classList.add('panel-open')
       opened = true
       try {
         await ensureFrame()
@@ -136,6 +138,7 @@
 
     function closePanel() {
       panel.classList.remove('open')
+      root.classList.remove('panel-open')
       opened = false
     }
 

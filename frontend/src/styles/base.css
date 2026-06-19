@@ -3803,6 +3803,10 @@ h2 {
   max-height: none;
 }
 
+.embed-test-config-modal {
+  width: min(720px, calc(100vw - 32px));
+}
+
 .embed-test-modal.n-card {
   display: flex;
   flex-direction: column;
@@ -3830,6 +3834,16 @@ h2 {
 .modal-title-stack small {
   font-size: 12px;
   color: #68766f;
+}
+
+.embed-test-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  width: 100%;
+  min-width: 0;
+  padding-right: 32px;
 }
 
 .embed-modal-grid {
@@ -3956,44 +3970,52 @@ h2 {
 .embed-test-layout {
   display: grid;
   height: 100%;
-  gap: 14px;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
 
-.embed-test-controls {
-  min-width: 0;
-  border: 1px solid #dce7e1;
-  border-radius: 8px;
-  padding: 12px;
-  background: #fbfdfb;
-}
-
-.embed-test-form-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.embed-test-form-grid .n-form-item {
-  min-width: 0;
-}
-
-.embed-test-actions {
+.embed-test-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex: 0 1 760px;
   min-width: 0;
+  border: 1px solid #dce7e1;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #f7fbf8;
 }
 
-.embed-test-actions span {
+.embed-test-status {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.embed-test-status strong {
+  color: #172a20;
+  font-size: 14px;
+}
+
+.embed-test-status span,
+.embed-test-status small {
   min-width: 0;
   overflow: hidden;
   color: #68766f;
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.embed-test-config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 12px;
+}
+
+.embed-test-config-grid .n-form-item {
+  min-width: 0;
 }
 
 .embed-test-preview {
@@ -4028,13 +4050,24 @@ h2 {
     grid-template-columns: 1fr;
   }
 
-  .embed-test-form-grid {
-    grid-template-columns: 1fr;
+  .embed-test-layout {
+    grid-template-rows: minmax(0, 1fr);
   }
 
-  .embed-test-actions {
+  .embed-test-header {
     align-items: flex-start;
     flex-direction: column;
+    padding-right: 28px;
+  }
+
+  .embed-test-toolbar {
+    width: 100%;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .embed-test-config-grid {
+    grid-template-columns: 1fr;
   }
 
   .embed-app-card header {

@@ -5,6 +5,7 @@ import {
   NButton,
   NForm,
   NFormItem,
+  NIcon,
   NInput,
   NModal,
   NPopconfirm,
@@ -12,6 +13,7 @@ import {
   NSpace,
   NTag
 } from 'naive-ui'
+import { RotateCw, Settings2 } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
 import { notify } from '@/composables/useNotify'
 import { useProjectStore } from '@/stores/project'
@@ -32,6 +34,7 @@ const {
 const selectedProject = computed(() => project.projectOptionRecords.find((item) => item.id === embedProjectId.value))
 const origin = computed(() => window.location.origin)
 const integrationTestVisible = ref(false)
+const integrationTestConfigVisible = ref(false)
 const integrationTestApp = ref<EmbedAppRecord | null>(null)
 const integrationTestDoc = ref('')
 const integrationTestExpiresAt = ref('')
@@ -137,20 +140,26 @@ async function openIntegrationTest(app: EmbedAppRecord) {
 
 async function runIntegrationTest() {
   const app = integrationTestApp.value
-  if (!app) return
+  if (!app) return false
   const externalUserID = integrationTestForm.external_user_id.trim()
   if (!externalUserID) {
     notify.warning('请输入测试用户 ID')
-    return
+    return false
   }
   const result = await project.createEmbedIntegrationTest(app, {
     external_user_id: externalUserID,
     external_user_name: integrationTestForm.external_user_name.trim(),
     ttl_seconds: 3600
   })
-  if (!result) return
+  if (!result) return false
   integrationTestExpiresAt.value = result.expires_at
   integrationTestDoc.value = integrationTestHTML(app, result.access_token)
+  return true
+}
+
+async function applyIntegrationTestConfig() {
+  const ok = await runIntegrationTest()
+  if (ok) integrationTestConfigVisible.value = false
 }
 
 function integrationTestHTML(app: EmbedAppRecord, token: string) {
@@ -431,39 +440,39 @@ async function copyText(text: string) {
     :mask-closable="false"
   >
     <template #header>
-      <div class="modal-title-stack">
-        <span>集成测试</span>
-        <small>{{ integrationTestApp?.name || '内嵌应用' }}</small>
+      <div class="embed-test-header">
+        <div class="modal-title-stack">
+          <span>集成测试</span>
+          <small>{{ integrationTestApp?.name || '内嵌应用' }}</small>
+        </div>
+        <div class="embed-test-toolbar">
+          <div class="embed-test-status">
+            <strong>{{ integrationTestForm.external_user_name || '测试用户' }}</strong>
+            <span>
+              {{ integrationTestForm.external_user_id || '-' }} · {{ integrationTestForm.key || 'default' }} ·
+              {{ integrationTestForm.session_mode === 'new' ? '新会话' : '复用' }}
+            </span>
+            <small v-if="integrationTestExpiresAt">Token 到期：{{ integrationTestExpiresAt }}</small>
+          </div>
+          <NSpace size="small">
+            <NButton secondary @click="integrationTestConfigVisible = true">
+              <template #icon>
+                <NIcon :component="Settings2" />
+              </template>
+              测试配置
+            </NButton>
+            <NButton type="primary" secondary :loading="workspace.loading" @click="runIntegrationTest">
+              <template #icon>
+                <NIcon :component="RotateCw" />
+              </template>
+              重新测试
+            </NButton>
+          </NSpace>
+        </div>
       </div>
     </template>
 
     <div class="embed-test-layout">
-      <section class="embed-test-controls">
-        <NForm label-placement="top">
-          <div class="embed-test-form-grid">
-            <NFormItem label="测试用户 ID">
-              <NInput v-model:value="integrationTestForm.external_user_id" />
-            </NFormItem>
-            <NFormItem label="测试用户名称">
-              <NInput v-model:value="integrationTestForm.external_user_name" />
-            </NFormItem>
-            <NFormItem label="业务 Key">
-              <NInput v-model:value="integrationTestForm.key" />
-            </NFormItem>
-            <NFormItem label="会话模式">
-              <NSelect v-model:value="integrationTestForm.session_mode" :options="sessionModeOptions" />
-            </NFormItem>
-            <NFormItem label="模拟三方来源">
-              <NInput v-model:value="integrationTestForm.parent_origin" />
-            </NFormItem>
-          </div>
-          <div class="embed-test-actions">
-            <span v-if="integrationTestExpiresAt">Token 到期：{{ integrationTestExpiresAt }}</span>
-            <NButton type="primary" secondary :loading="workspace.loading" @click="runIntegrationTest">重新测试</NButton>
-          </div>
-        </NForm>
-      </section>
-
       <section class="embed-test-preview">
         <iframe
           v-if="integrationTestDoc"
@@ -475,5 +484,43 @@ async function copyText(text: string) {
         <div v-else class="embed-test-empty">正在准备测试页面</div>
       </section>
     </div>
+  </NModal>
+
+  <NModal
+    v-model:show="integrationTestConfigVisible"
+    preset="card"
+    class="embed-test-config-modal"
+    :mask-closable="false"
+  >
+    <template #header>
+      <div class="modal-title-stack">
+        <span>测试配置</span>
+        <small>模拟第三方系统传入的用户、业务上下文和来源</small>
+      </div>
+    </template>
+
+    <NForm label-placement="top">
+      <div class="embed-test-config-grid">
+        <NFormItem label="测试用户 ID">
+          <NInput v-model:value="integrationTestForm.external_user_id" />
+        </NFormItem>
+        <NFormItem label="测试用户名称">
+          <NInput v-model:value="integrationTestForm.external_user_name" />
+        </NFormItem>
+        <NFormItem label="业务 Key">
+          <NInput v-model:value="integrationTestForm.key" />
+        </NFormItem>
+        <NFormItem label="会话模式">
+          <NSelect v-model:value="integrationTestForm.session_mode" :options="sessionModeOptions" />
+        </NFormItem>
+        <NFormItem label="模拟三方来源">
+          <NInput v-model:value="integrationTestForm.parent_origin" />
+        </NFormItem>
+      </div>
+      <div class="modal-actions">
+        <NButton secondary @click="integrationTestConfigVisible = false">取消</NButton>
+        <NButton type="primary" :loading="workspace.loading" @click="applyIntegrationTestConfig">保存并重新测试</NButton>
+      </div>
+    </NForm>
   </NModal>
 </template>
