@@ -1,0 +1,5 @@
+ClickHouse 方言规则：
+1. 适合分析型聚合查询，优先避免大范围明细扫描。
+2. 时间函数可使用 now(), today(), toDate(), toStartOfDay(), subtractDays()。
+3. 分页使用 LIMIT。
+4. 注意 ClickHouse 不支持部分传统事务数据库语法。

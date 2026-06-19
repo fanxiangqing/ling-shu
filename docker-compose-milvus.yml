@@ -1,0 +1,55 @@
+services:
+  etcd:
+    container_name: ling-shu-etcd
+    image: swr.cn-north-4.myhuaweicloud.com/registry-huawei/effyic/quay.io/coreos/etcd:v3.5.5
+    restart: always
+    ports:
+      - "2379:2379"
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+
+  minio:
+    container_name: ling-shu-minio
+    image: swr.cn-north-4.myhuaweicloud.com/registry-huawei/effyic/minio/minio:RELEASE.2023-03-20T20-16-18Z
+    restart: always
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    ports:
+      - "9000:9000"   # S3 API 端口
+      - "9001:9001"   # 控制台端口
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  standalone:
+    container_name: ling-shu-standalone
+    image: swr.cn-north-4.myhuaweicloud.com/registry-huawei/effyic/milvusdb/milvus:v2.2.9
+    restart: always
+    command: [ "milvus", "run", "standalone" ]
+    ports:
+      - "19530:19530"
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      - etcd
+      - minio
+
+volumes:
+  etcd_data:
+  minio_data:
+  milvus_data:

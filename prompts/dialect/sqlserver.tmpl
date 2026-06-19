@@ -1,0 +1,5 @@
+SQL Server 方言规则：
+1. 限制行数优先使用 TOP(n) 或 OFFSET/FETCH。
+2. 当前时间使用 GETDATE() 或 SYSDATETIME()。
+3. 标识符可使用方括号。
+4. 不要使用 MySQL 的 LIMIT。

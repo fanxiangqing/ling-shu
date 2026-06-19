@@ -1,0 +1,35 @@
+输出必须是 JSON，不要输出 Markdown，不要包裹代码块。
+
+JSON Schema：
+{
+  "intent": "query | multi_query | clarify",
+  "thought": "简短说明你如何选择数据源、指标和表",
+  "datasource_id": 0,
+  "datasource_ids": [],
+  "dialect": "mysql",
+  "requires_multi_datasource": false,
+  "need_clarification": false,
+  "sql": "SELECT ...",
+  "sql_tasks": [
+    {
+      "datasource_id": 0,
+      "datasource_name": "数据源名称",
+      "dialect": "mysql",
+      "purpose": "这条 SQL 要完成的子任务",
+      "sql": "SELECT ..."
+    }
+  ],
+  "answer": "无需执行 SQL 时给用户看的回复，或跨源计划说明",
+  "explanation": "给用户看的简短解释"
+}
+
+字段要求：
+- intent：单数据源查询为 query；跨多个独立数据源为 multi_query；上下文不足为 clarify。
+- datasource_id：单数据源可回答时填写目标数据源 ID；未知或不适用时为 0。
+- datasource_ids：涉及的数据源 ID 列表。
+- dialect：目标 SQL 方言。
+- requires_multi_datasource：必须跨多个独立数据源拆分查询时为 true。
+- need_clarification：数据源、指标或口径不足以确定时为 true。
+- sql：只有单数据源可执行查询时才填写；否则为空字符串。
+- sql_tasks：跨数据源任务必须填写，每个 task 只能查询一个 datasource_id；不要生成跨库 JOIN、UNION 或依赖不同数据库互相访问的 SQL。
+- 跨数据源对比、汇总或图表任务：先把每个数据源需要的查询拆成 sql_tasks，执行结果由系统在 Agent Loop 中继续汇总。

@@ -1,0 +1,301 @@
+# Ling-Shu（灵数）
+
+[English](README.md)
+
+Ling-Shu 是一个企业级 ChatBI / Text2SQL / VoiceBI 平台。用户可以用自然语言向企业数据库提问，系统通过 ReAct Agent 循环完成任务规划、数据源路由、SQL 生成、安全审核、查询执行、结果汇总和图表展示，并支持流式 ASR/TTS 语音交互。
+
+后端围绕自然语言问数主链路做模块化组织：项目管理、数据源插件、元数据同步、RAG、ReAct Agent 执行、权限、审计、ASR 和 TTS 等能力都放在 `internal/` 下，便于按功能持续演进。
+
+## Web 管理台
+
+### 对话问数与 ReAct 结果观察
+
+![对话问数与 ReAct 结果观察](docs/images/chatbi-react-result.png)
+
+### 数据源与元数据
+
+![数据源列表](docs/images/datasource-list.png)
+
+![数据源元数据](docs/images/datasource-metadata.png)
+
+### 项目、成员、知识与审计
+
+![项目管理](docs/images/project-management.png)
+
+![成员管理](docs/images/member-management.png)
+
+![业务知识与 RAG](docs/images/business-knowledge-rag.png)
+
+![审计日志](docs/images/audit-log.png)
+
+## 核心能力
+
+- 自然语言问数，采用 ReAct Agent 方式循环完成用户任务。
+- 多租户模型：Tenant -> Project -> DataSource。
+- 项目级多数据源问答，支持跨数据源查询结果汇总与综合回答。
+- SQL 安全审核：仅允许 SELECT，禁止写入和 DDL，支持结果行数限制、超时控制和审计记录。
+- 元数据同步：Schema、Table、Column、Index、PrimaryKey、ForeignKey。
+- 业务知识 RAG：业务术语、指标口径、FewShot SQL。
+- LLM / ASR / TTS Provider 化，目前重点适配阿里云。
+- VoiceBI：流式 ASR 输入和流式 TTS 播放。
+- RBAC 权限角色：SuperAdmin、TenantAdmin、ProjectAdmin、Analyst、Viewer。
+- Vue 3 + TypeScript + Naive UI 前端管理台。
+
+## 技术栈
+
+- 后端：Go、Gin、GORM、Zap
+- 前端：Vue 3、TypeScript、Vite、Naive UI
+- 数据库：MySQL 8
+- 缓存：Redis
+- 向量数据库：Milvus
+- AI Provider：阿里云 DashScope / NLS
+- 部署：Docker、Docker Compose、Kubernetes
+
+## 系统架构
+
+```mermaid
+flowchart LR
+  User["业务用户"] --> Web["Vue 3 Web 管理台"]
+  Web --> API["Gin HTTP / SSE / WebSocket API"]
+  API --> Gate["认证、租户上下文、RBAC、审计"]
+  Gate --> Service["应用服务层"]
+
+  Service --> Agent["ReAct 问数 Agent"]
+  Service --> Knowledge["业务知识服务"]
+  Service --> Metadata["元数据同步服务"]
+  Service --> Voice["ASR / TTS 服务"]
+  Service --> Repo["Repository 层"]
+
+  Agent --> Review["SQL 安全审核"]
+  Review --> Executor["只读查询执行器"]
+  Executor --> Sources[("项目数据源")]
+
+  Knowledge --> RAG["RAG 召回与索引"]
+  RAG --> Milvus[("Milvus 向量库")]
+
+  Metadata --> Sources
+  Repo --> MySQL[("MySQL 元数据库")]
+  Service --> Redis[("Redis 缓存")]
+  Agent --> LLM["LLM Provider"]
+  Voice --> Speech["ASR / TTS Provider"]
+  LLM --> Aliyun["阿里云 DashScope"]
+  Speech --> AliyunNLS["阿里云 NLS"]
+```
+
+运行时可以分成三个边界：
+
+- **控制面**：租户、用户、项目、数据源绑定、Provider 配置、权限和审计记录保存在 MySQL。
+- **知识面**：业务术语、指标口径、FewShot SQL 和文档切片向量化后进入 Milvus，用于项目级 RAG 召回。
+- **执行面**：Agent 只能对当前项目绑定的数据源执行通过审核的只读 SQL。
+
+## 数据源支持
+
+当前已接入插件注册机制：
+
+- MySQL
+- PostgreSQL
+- KingbaseES
+- SQL Server
+- Oracle
+- ClickHouse
+- Doris
+- 达梦 DM8
+
+## 项目结构
+
+```text
+cmd/server/        服务启动入口
+configs/           配置示例
+docs/              架构与设计文档
+frontend/          Vue 3 前端
+internal/          业务模块
+  asr/             ASR Provider
+  audit/           审计
+  chat/            对话模块
+  datasource/      数据源插件与元数据同步
+  handler/         HTTP 和实时接口
+  llm/             LLM Provider
+  middleware/      Gin 中间件
+  model/           GORM Model
+  permission/      RBAC 权限
+  query/           ReAct Agent 与 SQL 执行
+  rag/             RAG 与 Milvus
+  repository/      数据访问层
+  router/          路由
+  service/         业务服务层
+  tts/             TTS Provider
+pkg/               公共包
+prompts/           Prompt 模板
+scripts/mysql/     MySQL 初始化脚本
+deploy/            Kubernetes 配置
+```
+
+## 配置
+
+不要提交本地密钥。先从示例配置复制一份本地配置：
+
+```bash
+cp configs/config.example.yaml configs/config.yaml
+```
+
+然后编辑 `configs/config.yaml`。该文件已加入 `.gitignore`，用于本地私有配置。
+
+常用环境变量：
+
+```bash
+export LING_SHU_ALIYUN_API_KEY="your-dashscope-api-key"
+export LING_SHU_ASR_ENABLED=true
+export LING_SHU_TTS_ENABLED=true
+export ALIYUN_AK_ID="your-access-key-id"
+export ALIYUN_AK_SECRET="your-access-key-secret"
+export LING_SHU_ALIYUN_NLS_APP_KEY="your-nls-app-key"
+```
+
+ASR 和 TTS 是可选能力。TTS 未启用时，语音问数仍会返回转写文本和 ChatBI 结果，只是不生成播报音频。
+
+## 快速启动
+
+### Docker Compose
+
+```bash
+docker compose up --build
+```
+
+默认会启动 API、MySQL 和 Redis。MySQL 首次启动会执行：
+
+```text
+scripts/mysql/001_init_schema.sql
+```
+
+Milvus 单独启动：
+
+```bash
+docker compose -f docker-compose-milvus.yml up -d
+```
+
+### 后端
+
+```bash
+cp configs/config.example.yaml configs/config.yaml
+go run ./cmd/server -config configs/config.yaml
+```
+
+默认监听：
+
+```text
+http://localhost:8080
+```
+
+### 前端
+
+```bash
+cd frontend
+pnpm install
+pnpm dev
+```
+
+默认监听：
+
+```text
+http://localhost:5173
+```
+
+前端会通过 Vite 代理访问后端 API 和 WebSocket。
+
+## 业务流程
+
+![Ling-Shu ReAct Agent 业务流程](docs/images/react-agent-business-flow.svg)
+
+这条链路从项目配置和知识准备开始，进入 ReAct 循环：**Thought -> Action -> Observation -> Repeat / Result**。Agent 会基于元数据、RAG、SQL 审核、查询返回行或用户澄清持续观察，只有证据足够时才输出最终答案。
+
+## 运行原理
+
+```mermaid
+sequenceDiagram
+  participant User as 用户
+  participant Web as Web 管理台
+  participant Chat as 对话服务
+  participant RAG as RAG 服务
+  participant Agent as ReAct Agent
+  participant SQL as SQL 审核器
+  participant DB as 业务数据源
+  participant LLM as 结果综合 LLM
+  participant Audit as 审计日志
+
+  User->>Web: 提出业务问题
+  Web->>Chat: 发送文本或音频流
+  Chat->>RAG: 检索项目知识
+  RAG-->>Chat: 返回术语、指标、FewShot SQL、文档切片
+  Chat->>Agent: 组装任务上下文
+  Agent->>Agent: 路由数据源并读取元数据
+  Agent->>SQL: 提交生成的 SQL 做安全审核
+  SQL-->>Agent: 返回通过后的 SQL 或拒绝原因
+  Chat->>DB: 执行审核通过的只读查询
+  DB-->>Chat: 返回数据行、执行统计和图表建议
+  Chat->>LLM: 观察执行结果并生成最终答案
+  LLM-->>Chat: 返回面向业务用户的结论或兜底信号
+  opt LLM 结果综合不可用
+    Chat->>Chat: 基于返回行生成本地答案摘要
+  end
+  Chat->>Audit: 记录调用链路、SQL 审核和查询执行
+  Chat-->>Web: 流式返回步骤、最终答案、结果数据和播报文本
+```
+
+核心原则：
+
+- **元数据优先**：Text2SQL Prompt 会注入已同步的库表、字段、注释、索引、主外键和项目绑定关系。
+- **业务语言优先**：RAG 会注入术语和指标口径，让用户可以直接说“GMV”“活跃用户”“新增客户”等业务词。
+- **先审核再执行**：SQL 执行前必须经过安全审核，写入语句、DDL、多语句和高风险模式会被拦截。
+- **迭代式 ReAct 循环**：Agent 会重复 Thought -> Action -> Observation，直到拥有足够可信的数据或需要用户澄清。
+- **边界保持轻量**：普通 CRUD 走清晰的 `handler -> service -> repository -> model` 链路，高变化的 AI、RAG、Provider、数据源插件独立封装。
+- **工具后继续观察**：SQL 执行完成后会把返回行交给结果综合链路，让最终答案基于工具观察结果生成；本地摘要只作为兜底。
+- **语音只是输入输出方式**：ASR 会转成同一条对话请求，TTS 播放精简后的答案摘要，不播放完整推理过程或用户原问题。
+
+## API 概览
+
+业务接口统一位于：
+
+```text
+/api/v1
+```
+
+主要模块：
+
+- `/auth/*` 用户注册和登录
+- `/tenants/*` 租户和租户成员
+- `/projects/*` 项目、成员、Provider 配置、知识库、RAG
+- `/datasources/*` 数据源测试、元数据同步、元数据预览
+- `/chat/*` 会话、消息、消息流式接口、实时语音接口
+- `/query/*` SQL 审核、执行和历史
+- `/providers/*` LLM / ASR / TTS Provider 工具接口
+- `/audit/*` 审计日志和查询执行记录
+
+需要认证的接口请带上：
+
+```text
+Authorization: Bearer <access_token>
+```
+
+## 开发
+
+运行后端测试：
+
+```bash
+go test ./...
+```
+
+构建前端：
+
+```bash
+pnpm --dir frontend build
+```
+
+## 安全提醒
+
+- 不要提交 `configs/config.yaml`、`config.yaml`、`.env` 或任何 Provider 密钥。
+- 公开仓库只保留 `configs/config.example.yaml`。
+- 生产环境建议给业务数据源使用只读账号。
+
+## 开源协议
+
+Ling-Shu 基于 [MIT License](LICENSE) 开源。

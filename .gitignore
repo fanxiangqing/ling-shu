@@ -1,0 +1,18 @@
+.gocache/
+.cache/
+.idea/
+frontend/node_modules/
+frontend/dist/
+logs/
+docs/architecture-clean-lite.md
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+config.yaml
+config.yml
+configs/config.yaml
+configs/config.yml
+configs/*.local.yaml
+configs/*.local.yml

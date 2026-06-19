@@ -1,0 +1,5 @@
+MySQL 8 方言规则：
+1. 使用反引号包裹保留字或特殊字段名。
+2. 时间函数优先使用 NOW(), CURDATE(), DATE_SUB(), DATE_FORMAT()。
+3. 分页使用 LIMIT。
+4. 字符串匹配使用 LIKE 或 =，不要使用 PostgreSQL 的 ILIKE。

@@ -1,0 +1,168 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="900" viewBox="0 0 1500 900" role="img" aria-labelledby="title desc">
+  <title id="title">Ling-Shu ReAct Agent Business Flow</title>
+  <desc id="desc">A business workflow diagram showing Ling-Shu project setup, knowledge preparation, ReAct thought action observation loop, SQL execution, result synthesis, chart, TTS and audit outputs.</desc>
+  <defs>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3f6f9f"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f28b32"/>
+    </marker>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#2f4d68" flood-opacity="0.16"/>
+    </filter>
+    <style>
+      .bg { fill: #eef6fb; }
+      .panel { fill: #ffffff; stroke: #d7e4ee; stroke-width: 2; }
+      .blue { fill: #4f83c2; }
+      .blue-dark { fill: #35699f; }
+      .orange { fill: #ff983d; }
+      .green { fill: #15966f; }
+      .line { fill: none; stroke: #3f6f9f; stroke-width: 3; marker-end: url(#arrow-blue); }
+      .line-soft { fill: none; stroke: #7a9fc3; stroke-width: 3; marker-end: url(#arrow-blue); }
+      .dash { fill: none; stroke: #7a9fc3; stroke-width: 3; stroke-dasharray: 11 11; marker-end: url(#arrow-blue); }
+      .orange-line { fill: none; stroke: #f28b32; stroke-width: 3; marker-end: url(#arrow-orange); }
+      .title { font-family: sans-serif; font-size: 36px; font-weight: 700; fill: #173042; }
+      .subtitle { font-family: sans-serif; font-size: 18px; font-weight: 500; fill: #607684; }
+      .section { font-family: sans-serif; font-size: 18px; font-weight: 700; fill: #2d536f; }
+      .node-text { font-family: sans-serif; font-size: 18px; font-weight: 700; fill: #ffffff; text-anchor: middle; }
+      .node-small { font-family: sans-serif; font-size: 15px; font-weight: 600; fill: #ffffff; text-anchor: middle; }
+      .dark-text { font-family: sans-serif; font-size: 16px; font-weight: 700; fill: #244457; text-anchor: middle; }
+      .muted { font-family: sans-serif; font-size: 14px; font-weight: 600; fill: #668092; text-anchor: middle; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1500" height="900" rx="28"/>
+
+  <text class="title" x="750" y="54" text-anchor="middle">Ling-Shu ReAct Agent Workflow</text>
+  <text class="subtitle" x="750" y="84" text-anchor="middle">Project setup -> context preparation -> Thought / Action / Observation loop -> answer, chart, TTS and audit</text>
+
+  <rect class="panel" x="60" y="125" width="350" height="650" rx="28" filter="url(#shadow)"/>
+  <text class="section" x="235" y="165" text-anchor="middle">Business Setup</text>
+
+  <rect class="blue" x="130" y="195" width="210" height="62" rx="31"/>
+  <text class="node-text" x="235" y="220">Tenant</text>
+  <text class="node-small" x="235" y="241">Workspace</text>
+
+  <rect class="blue" x="130" y="287" width="210" height="62" rx="31"/>
+  <text class="node-text" x="235" y="312">Project</text>
+  <text class="node-small" x="235" y="333">Scoped Analysis</text>
+
+  <rect class="blue" x="130" y="379" width="210" height="62" rx="31"/>
+  <text class="node-text" x="235" y="404">Data Sources</text>
+  <text class="node-small" x="235" y="425">Connections</text>
+
+  <rect class="blue" x="130" y="471" width="210" height="62" rx="31"/>
+  <text class="node-text" x="235" y="496">Members</text>
+  <text class="node-small" x="235" y="517">Access Control</text>
+
+  <rect class="orange" x="95" y="595" width="130" height="70" rx="24"/>
+  <text class="node-small" x="160" y="622">Metadata</text>
+  <text class="node-small" x="160" y="645">Sync</text>
+
+  <rect class="orange" x="245" y="595" width="130" height="70" rx="24"/>
+  <text class="node-small" x="310" y="622">Knowledge</text>
+  <text class="node-small" x="310" y="645">RAG Index</text>
+
+  <line x1="235" y1="258" x2="235" y2="282" style="stroke:#3f6f9f;stroke-width:4"/>
+  <polygon points="235,287 228,276 242,276" fill="#3f6f9f"/>
+  <line x1="235" y1="350" x2="235" y2="374" style="stroke:#3f6f9f;stroke-width:4"/>
+  <polygon points="235,379 228,368 242,368" fill="#3f6f9f"/>
+  <line x1="235" y1="442" x2="235" y2="466" style="stroke:#3f6f9f;stroke-width:4"/>
+  <polygon points="235,471 228,460 242,460" fill="#3f6f9f"/>
+  <line x1="235" y1="534" x2="163" y2="590" style="stroke:#3f6f9f;stroke-width:4"/>
+  <polygon points="160,595 164,582 173,593" fill="#3f6f9f"/>
+  <line x1="235" y1="534" x2="307" y2="590" style="stroke:#3f6f9f;stroke-width:4"/>
+  <polygon points="310,595 297,593 306,582" fill="#3f6f9f"/>
+
+  <rect class="panel" x="485" y="125" width="530" height="650" rx="28" filter="url(#shadow)"/>
+  <text class="section" x="750" y="165" text-anchor="middle">ReAct Agent Loop</text>
+
+  <polygon class="blue-dark" points="665,195 835,195 880,240 835,285 665,285 620,240"/>
+  <text class="node-text" x="750" y="234">Question</text>
+  <text class="node-small" x="750" y="257">Text or Voice</text>
+
+  <polygon class="blue" points="665,325 835,325 880,370 835,415 665,415 620,370"/>
+  <text class="node-text" x="750" y="356">Thought</text>
+  <text class="node-small" x="750" y="379">Intent, metrics, context</text>
+
+  <polygon class="blue" points="665,455 835,455 880,500 835,545 665,545 620,500"/>
+  <text class="node-text" x="750" y="486">Action</text>
+  <text class="node-small" x="750" y="509">Choose and call tools</text>
+
+  <polygon class="blue" points="665,585 835,585 880,630 835,675 665,675 620,630"/>
+  <text class="node-text" x="750" y="616">Observation</text>
+  <text class="node-small" x="750" y="639">Read rows, errors, reviews</text>
+
+  <polygon class="green" points="665,715 835,715 880,760 835,805 665,805 620,760"/>
+  <text class="node-text" x="750" y="746">Result</text>
+  <text class="node-small" x="750" y="769">result.synthesize</text>
+
+  <line x1="750" y1="286" x2="750" y2="320" style="stroke:#3f6f9f;stroke-width:4"/>
+  <polygon points="750,325 743,314 757,314" fill="#3f6f9f"/>
+  <line x1="750" y1="416" x2="750" y2="450" style="stroke:#3f6f9f;stroke-width:4"/>
+  <polygon points="750,455 743,444 757,444" fill="#3f6f9f"/>
+  <line x1="750" y1="546" x2="750" y2="580" style="stroke:#3f6f9f;stroke-width:4"/>
+  <polygon points="750,585 743,574 757,574" fill="#3f6f9f"/>
+  <line x1="750" y1="676" x2="750" y2="710" style="stroke:#3f6f9f;stroke-width:4"/>
+  <polygon points="750,715 743,704 757,704" fill="#3f6f9f"/>
+
+  <polyline points="890,630 970,585 970,420 890,370" fill="none" style="stroke:#7a9fc3;stroke-width:4;stroke-dasharray:11 11"/>
+  <polygon points="890,370 904,371 896,383" fill="#7a9fc3"/>
+  <text class="dark-text" x="1005" y="480">Need More Evidence</text>
+  <text class="muted" x="1005" y="504">Repeat</text>
+
+  <polyline points="610,630 530,585 530,420 610,370" fill="none" style="stroke:#7a9fc3;stroke-width:4;stroke-dasharray:11 11"/>
+  <polygon points="610,370 604,383 596,371" fill="#7a9fc3"/>
+  <text class="dark-text" x="492" y="480">More Context</text>
+  <text class="muted" x="492" y="504">RAG / Metadata</text>
+
+  <line x1="410" y1="410" x2="614" y2="371" style="stroke:#3f6f9f;stroke-width:4"/>
+  <polygon points="620,370 608,365 611,379" fill="#3f6f9f"/>
+  <line x1="410" y1="630" x2="615" y2="503" style="stroke:#3f6f9f;stroke-width:4"/>
+  <polygon points="620,500 613,512 606,500" fill="#3f6f9f"/>
+
+  <rect class="panel" x="1090" y="125" width="350" height="650" rx="28" filter="url(#shadow)"/>
+  <text class="section" x="1265" y="165" text-anchor="middle">Tools &amp; Outputs</text>
+
+  <rect class="orange" x="1145" y="205" width="240" height="50" rx="25"/>
+  <text class="node-small" x="1265" y="236">datasource.route</text>
+
+  <rect class="orange" x="1145" y="280" width="240" height="50" rx="25"/>
+  <text class="node-small" x="1265" y="311">metadata.lookup</text>
+
+  <rect class="orange" x="1145" y="355" width="240" height="50" rx="25"/>
+  <text class="node-small" x="1265" y="386">rag.retrieve</text>
+
+  <rect class="orange" x="1145" y="430" width="240" height="50" rx="25"/>
+  <text class="node-small" x="1265" y="461">llm.text2sql</text>
+
+  <rect class="orange" x="1145" y="505" width="240" height="50" rx="25"/>
+  <text class="node-small" x="1265" y="536">sql.review</text>
+
+  <rect class="orange" x="1145" y="580" width="240" height="50" rx="25"/>
+  <text class="node-small" x="1265" y="611">sql.execute</text>
+
+  <rect class="green" x="1145" y="685" width="240" height="62" rx="24"/>
+  <text class="node-small" x="1265" y="711">Answer / Table / Chart</text>
+  <text class="node-small" x="1265" y="733">TTS / Audit / History</text>
+
+  <line x1="880" y1="500" x2="1140" y2="235" style="stroke:#f28b32;stroke-width:4"/>
+  <polygon points="1145,230 1140,243 1131,233" fill="#f28b32"/>
+  <line x1="880" y1="500" x2="1139" y2="309" style="stroke:#f28b32;stroke-width:4"/>
+  <polygon points="1145,305 1138,317 1130,306" fill="#f28b32"/>
+  <line x1="880" y1="500" x2="1138" y2="383" style="stroke:#f28b32;stroke-width:4"/>
+  <polygon points="1145,380 1136,391 1130,378" fill="#f28b32"/>
+  <line x1="880" y1="500" x2="1138" y2="456" style="stroke:#f28b32;stroke-width:4"/>
+  <polygon points="1145,455 1134,463 1132,449" fill="#f28b32"/>
+  <line x1="880" y1="500" x2="1138" y2="529" style="stroke:#f28b32;stroke-width:4"/>
+  <polygon points="1145,530 1132,535 1134,521" fill="#f28b32"/>
+  <line x1="880" y1="500" x2="1140" y2="601" style="stroke:#f28b32;stroke-width:4"/>
+  <polygon points="1145,605 1131,605 1136,592" fill="#f28b32"/>
+  <line x1="880" y1="760" x2="1138" y2="717" style="stroke:#3f6f9f;stroke-width:4"/>
+  <polygon points="1145,716 1133,724 1131,710" fill="#3f6f9f"/>
+
+  <rect class="blue" x="410" y="812" width="680" height="62" rx="28" opacity="0.92"/>
+  <text class="node-small" x="750" y="838">Return the final answer only when evidence is enough.</text>
+  <text class="node-small" x="750" y="859">Otherwise keep observing or ask for clarification.</text>
+</svg>

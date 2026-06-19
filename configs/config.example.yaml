@@ -1,0 +1,167 @@
+# Ling-Shu 示例配置
+# 复制本文件为 configs/config.yaml 后再填写本地密钥和连接信息。
+
+app:
+  # 应用名称，仅用于日志和运行标识。
+  name: ling-shu
+  # 运行环境：local / dev / test / prod。
+  env: local
+
+server:
+  # 服务监听地址。Docker/Kubernetes 中通常使用 0.0.0.0，本机开发也可以改成 127.0.0.1。
+  host: 0.0.0.0
+  # HTTP API 端口。
+  port: 8080
+  # Gin 模式：debug / release / test。
+  mode: debug
+  # 请求头读取超时。
+  read_header_timeout: 5s
+  # 普通请求读取超时。流式接口主要依赖 write_timeout。
+  read_timeout: 30s
+  # 响应写入超时。Ling-Shu 的 Agent / SSE / WebSocket 可能运行较久，0 表示不主动截断。
+  write_timeout: 0s
+  # Keep-Alive 空闲连接超时。
+  idle_timeout: 60s
+
+log:
+  # 日志级别：debug / info / warn / error。
+  level: info
+  # console 适合开发查看；json 更适合生产采集。
+  encoding: console
+  # 是否输出到控制台。
+  console_enabled: true
+  # 是否写入日志文件。
+  file_enabled: true
+  # 日志目录。
+  file_dir: logs
+  # 日志文件名前缀。程序会按天轮转，并维护 current.log 软链指向当天日志。
+  file_name: ling-shu
+
+auth:
+  # JWT 签名密钥。生产环境请替换成足够长的随机字符串。
+  jwt_secret: "change-me-to-a-long-random-secret"
+  # 登录态有效期。
+  access_token_ttl: 24h
+
+security:
+  # 数据源 DSN 加密密钥。生产环境必须替换并妥善保存，变更后旧数据源连接信息将无法解密。
+  dsn_secret: "change-me-to-a-32-byte-dsn-secret"
+
+prompts:
+  # Prompt 模板目录。不要把 Prompt 写死在代码里，方便后续按项目和方言持续迭代。
+  dir: prompts
+
+database:
+  # 是否启用 Ling-Shu 元数据库。
+  enabled: true
+  # Ling-Shu 自身的 MySQL 连接串，不是业务问数数据源。
+  dsn: "root:root@tcp(127.0.0.1:3306)/ling_shu?charset=utf8mb4&parseTime=true&loc=Local"
+  # 连接池最大打开连接数。
+  max_open_conns: 30
+  # 连接池最大空闲连接数。
+  max_idle_conns: 10
+  # 单个连接最大复用时间。
+  conn_max_lifetime: 1h
+
+redis:
+  # 是否启用 Redis。用于限流、查询锁和元数据缓存。
+  enabled: true
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+  dial_timeout: 2s
+  read_timeout: 2s
+  write_timeout: 2s
+  rate_limit:
+    # HTTP API 简单限流。
+    enabled: true
+    requests: 120
+    window: 1m
+    prefix: "ling-shu:rate"
+  query_lock:
+    # 防止同一会话重复提交相同问题。
+    enabled: true
+    ttl: 30s
+    prefix: "ling-shu:query:lock"
+  metadata_cache:
+    # 项目元数据缓存，减少每次问数的元数据读取开销。
+    enabled: true
+    ttl: 10m
+    prefix: "ling-shu:project:meta"
+
+rag:
+  milvus:
+    # 是否启用 Milvus 知识库索引。
+    enabled: true
+    # Milvus 地址。使用 docker-compose-milvus.yml 时通常是 127.0.0.1:19530。
+    address: "127.0.0.1:19530"
+    # 知识库向量集合名。
+    collection: "ling_shu_kb_chunks"
+    # 向量维度，需要和 embedding_model 输出维度一致。
+    dimension: 1024
+    # 每次召回的知识片段数量。
+    top_k: 8
+    timeout: 10s
+
+providers:
+  llm:
+    # 目前项目默认接入阿里云百炼兼容 OpenAI API。
+    provider: aliyun
+    # 阿里云 DashScope API Key。不要提交真实密钥到 Git。
+    api_key: ""
+    # OpenAI 兼容接口地址。
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    # Chat/Text2SQL 使用的模型。
+    chat_model: "qwen-plus"
+    # RAG 向量化使用的模型。
+    embedding_model: "text-embedding-v4"
+    # 大模型请求超时。Agent loop 可能较长，可按业务调整。
+    timeout: 180s
+  asr:
+    # ASR 是可选插件；未启用时前端语音入口应不可用或提示配置。
+    enabled: false
+    provider: aliyun
+    # 阿里云 NLS Token 可留空，服务会使用 access_key_id / access_key_secret 自动获取。
+    token: ""
+    access_key_id: ""
+    access_key_secret: ""
+    token_endpoint: "https://nls-meta.cn-shanghai.aliyuncs.com/"
+    token_region_id: "cn-shanghai"
+    # Token 过期前多久主动刷新。
+    token_refresh_before: 10m
+    # 阿里云智能语音交互 AppKey。
+    app_key: ""
+    websocket_url: "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1"
+    model: "nls-realtime-asr"
+    # 前端实时麦克风采集为 16k 单声道 PCM。
+    format: "pcm"
+    sample_rate: 16000
+    enable_intermediate_result: true
+    enable_punctuation_prediction: true
+    enable_inverse_text_normalization: true
+    enable_words: false
+    timeout: 120s
+  tts:
+    # TTS 是可选插件；关闭后仍可完成文本问数，只是不播报。
+    enabled: false
+    provider: aliyun
+    # 阿里云 NLS Token 可留空，服务会自动获取。
+    token: ""
+    access_key_id: ""
+    access_key_secret: ""
+    token_endpoint: "https://nls-meta.cn-shanghai.aliyuncs.com/"
+    token_region_id: "cn-shanghai"
+    token_refresh_before: 10m
+    app_key: ""
+    websocket_url: "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1"
+    model: "nls-tts"
+    # 播报音色，可按阿里云支持列表调整。
+    voice: "aixia"
+    # 前端会按流式音频分片播放。
+    format: "mp3"
+    sample_rate: 16000
+    volume: 50
+    speech_rate: 0
+    pitch_rate: 0
+    enable_subtitle: false
+    timeout: 60s

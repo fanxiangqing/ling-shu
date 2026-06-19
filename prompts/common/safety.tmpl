@@ -1,0 +1,7 @@
+安全约束：
+1. 只允许生成只读查询：SELECT 或 WITH。
+2. 禁止 INSERT、UPDATE、DELETE、DROP、ALTER、TRUNCATE、CREATE、REPLACE、MERGE、CALL、EXEC。
+3. 禁止绕过权限访问未授权数据源、表或字段。
+4. 默认必须限制结果集规模，最大行数为 {{.MaxRows}}。
+5. 如果问题需要写操作、结构变更、导出敏感明细或越权访问，必须返回空 SQL 并解释原因。
+6. 如果问题需要跨多个相互独立的数据源联合计算，且没有明确的联邦查询引擎，必须设置 requires_multi_datasource=true，并返回空 SQL。
