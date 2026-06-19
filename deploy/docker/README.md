@@ -46,6 +46,7 @@ docker compose --env-file .env up -d --build
 - MySQL 首次启动会自动执行 `scripts/mysql/001_init_schema.sql` 初始化表结构，该脚本已包含第三方内嵌的 `embed_apps` 和 `embed_sessions` 表。
 - 已存在数据库升级时，需要按编号顺序执行增量脚本，例如本次第三方内嵌能力需要导入 `scripts/mysql/007_embed_apps.sql`，它会同时补齐加密保存 `App Secret` 的字段。
 - 部署后可在项目管理的“内嵌”列表点击“集成测试”，控制台会用接近全屏的模拟第三方页面加载正式 JS SDK，便于验证悬浮机器人、弹窗、会话策略和 ASR/TTS。
+- 需要模拟真实三方系统时，可运行 `examples/embed-third-party-demo`。Docker 默认可设置 `LINGSHU_WEB_BASE_URL=http://localhost:${LING_SHU_WEB_PORT:-80}`、`LINGSHU_API_BASE_URL=http://localhost:${LING_SHU_API_PORT:-8080}/api/v1`，并把 Demo 来源 `http://localhost:8099` 加入内嵌应用允许来源。
 - 如使用外部 MySQL，可在 `.env` 设置 `LING_SHU_MYSQL_DSN` 覆盖默认连接。
 - 不需要 RAG / 向量召回时，可设置 `LING_SHU_MILVUS_ENABLED=false`，并按需停用 `etcd`、`minio`、`milvus` 服务。
 - 所有数据保存在命名卷中（`mysql_data`、`redis_data`、`milvus_data` 等），`docker compose down -v` 会清空数据。
@@ -110,6 +111,7 @@ docker compose --env-file .env up -d --build
 - MySQL runs `scripts/mysql/001_init_schema.sql` on first startup to initialize the schema, including the `embed_apps` and `embed_sessions` tables for third-party embedding.
 - When upgrading an existing database, apply incremental scripts in numeric order. The third-party embedding feature requires `scripts/mysql/007_embed_apps.sql`, which also adds the encrypted `App Secret` column when needed.
 - After deployment, open **Embed > Integration Test** from project management. The console loads the real JS SDK inside a near full-screen simulated third-party page so you can verify the floating bot, modal, session policy, and ASR/TTS.
+- To simulate a real third-party system, run `examples/embed-third-party-demo`. With the Docker defaults, set `LINGSHU_WEB_BASE_URL=http://localhost:${LING_SHU_WEB_PORT:-80}` and `LINGSHU_API_BASE_URL=http://localhost:${LING_SHU_API_PORT:-8080}/api/v1`, then add the demo origin `http://localhost:8099` to the embed app's allowed origins.
 - To use an external MySQL, set `LING_SHU_MYSQL_DSN` in `.env` to override the default connection.
 - If you do not need RAG / vector retrieval, set `LING_SHU_MILVUS_ENABLED=false` and stop the `etcd`, `minio`, and `milvus` services as needed.
 - All data is stored in named volumes (`mysql_data`, `redis_data`, `milvus_data`, ...). `docker compose down -v` wipes the data.

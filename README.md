@@ -192,6 +192,23 @@ Frontend integration example:
 
 The SDK defaults to a bottom-right floating launcher. The desktop modal leaves more room for tables, SQL, and voice interaction results; mobile layouts expand close to full-screen. `position` accepts `bottom-right`, `bottom-left`, `top-right`, or `top-left`, and `launcher.title` overrides the launcher label.
 
+The repository also includes a dependency-free temporary third-party system demo: [examples/embed-third-party-demo](examples/embed-third-party-demo). It uses Node.js to simulate the third-party backend token endpoint and plain HTML to load the Ling-Shu JS SDK, which is useful for validating a real integration path. After creating an embed app, add `http://localhost:8099` to the allowed origins, then run:
+
+```bash
+cd examples/embed-third-party-demo
+
+LINGSHU_WEB_BASE_URL=http://localhost:5173 \
+LINGSHU_API_BASE_URL=http://localhost:8080/api/v1 \
+LINGSHU_EMBED_APP_ID=emb_xxx \
+LINGSHU_EMBED_APP_SECRET=your_app_secret \
+DEMO_EXTERNAL_USER_ID=third-party-user-001 \
+DEMO_EXTERNAL_USER_NAME=ThirdPartyDemoUser \
+DEMO_SESSION_KEY=dashboard:demo \
+node server.js
+```
+
+Open `http://localhost:8099` to see a simulated third-party business page with the real SDK floating bot. `App Secret` stays in the Node process environment and is never sent to the browser.
+
 `tokenProvider` should call the third-party system's own backend. That backend reads the current logged-in user and asks Ling-Shu for a short-lived embed token:
 
 ```js

@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>第三方系统集成测试</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="logo-mark">测</div>
+      <h1>Acme BI Console</h1>
+      <p>模拟第三方业务系统</p>
+      <nav>
+        <a class="active" href="#">经营看板</a>
+        <a href="#">客户分析</a>
+        <a href="#">订单明细</a>
+        <a href="#">财务报表</a>
+        <a href="#">系统配置</a>
+      </nav>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div>
+          <span class="eyebrow">Dashboard</span>
+          <h2>经营看板</h2>
+        </div>
+        <div class="user-pill">
+          <span id="demoUserName">测试用户</span>
+          <small id="demoUserId">third-party-user-001</small>
+        </div>
+      </header>
+
+      <section class="notice">
+        <strong>真实集成链路</strong>
+        <span>HTML 加载 Ling-Shu JS SDK，Node 后端用 App Secret 换取短期 Embed Token。</span>
+      </section>
+
+      <section class="metrics">
+        <article>
+          <span>业务 Key</span>
+          <strong id="demoSessionKey">dashboard:demo</strong>
+        </article>
+        <article>
+          <span>今日 GMV</span>
+          <strong>128.6w</strong>
+        </article>
+        <article>
+          <span>订单数</span>
+          <strong>4,982</strong>
+        </article>
+        <article>
+          <span>转化率</span>
+          <strong>18.7%</strong>
+        </article>
+      </section>
+
+      <section class="content-grid">
+        <article class="chart-card">
+          <div class="card-head">
+            <h3>近 6 小时交易趋势</h3>
+            <span>实时</span>
+          </div>
+          <div class="bars" aria-hidden="true">
+            <i style="height: 52%"></i>
+            <i style="height: 70%"></i>
+            <i style="height: 86%"></i>
+            <i style="height: 48%"></i>
+            <i style="height: 76%"></i>
+            <i style="height: 61%"></i>
+          </div>
+        </article>
+
+        <article class="config-card">
+          <h3>SDK 配置状态</h3>
+          <dl>
+            <div>
+              <dt>Ling-Shu Web</dt>
+              <dd id="demoWebBaseUrl">-</dd>
+            </div>
+            <div>
+              <dt>App ID</dt>
+              <dd id="demoAppId">emb_xxx</dd>
+            </div>
+            <div>
+              <dt>Token API</dt>
+              <dd>/api/lingshu/embed-token</dd>
+            </div>
+            <div>
+              <dt>Allowed Origin</dt>
+              <dd id="demoOrigin">-</dd>
+            </div>
+          </dl>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script src="/config.js"></script>
+  <script>
+    ;(function () {
+      var config = window.THIRD_PARTY_DEMO_CONFIG || {}
+      setText('demoUserName', config.externalUserName || '测试用户')
+      setText('demoUserId', config.externalUserId || '-')
+      setText('demoSessionKey', config.sessionKey || 'default')
+      setText('demoWebBaseUrl', config.lingShuWebBaseUrl || '-')
+      setText('demoAppId', config.appId || '-')
+      setText('demoOrigin', window.location.origin)
+
+      loadScript(config.lingShuWebBaseUrl.replace(/\/$/, '') + '/sdk/ling-shu-embed.js')
+        .then(function () {
+          window.LingShuEmbed.init({
+            appId: config.appId,
+            baseUrl: config.lingShuWebBaseUrl,
+            key: config.sessionKey || 'dashboard:demo',
+            sessionMode: config.sessionMode || undefined,
+            parentOrigin: window.location.origin,
+            position: 'bottom-right',
+            launcher: { title: '智能问数' },
+            tokenProvider: function () {
+              return fetch('/api/lingshu/embed-token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source: 'third-party-demo' })
+              }).then(function (response) {
+                if (!response.ok) {
+                  return response.text().then(function (text) {
+                    throw new Error(text || '签发 Embed Token 失败')
+                  })
+                }
+                return response.json()
+              })
+            }
+          })
+        })
+        .catch(function (error) {
+          console.error(error)
+          alert('Ling-Shu SDK 加载失败：' + (error.message || error))
+        })
+
+      function loadScript(src) {
+        return new Promise(function (resolve, reject) {
+          var script = document.createElement('script')
+          script.src = src
+          script.async = true
+          script.onload = resolve
+          script.onerror = function () {
+            reject(new Error('无法加载 ' + src))
+          }
+          document.head.appendChild(script)
+        })
+      }
+
+      function setText(id, value) {
+        var element = document.getElementById(id)
+        if (element) element.textContent = value
+      }
+    })()
+  </script>
+</body>
+</html>
