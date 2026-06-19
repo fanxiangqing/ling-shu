@@ -13,6 +13,10 @@ import (
 
 var (
 	ErrInvalidInput        = errors.New("invalid input")
+	ErrInvalidCredentials  = errors.New("invalid username or password")
+	ErrUserDisabled        = errors.New("user is disabled")
+	ErrNoActiveWorkspace   = errors.New("user has no active workspace")
+	ErrPrimaryAdminLocked  = errors.New("primary admin cannot be modified")
 	ErrDatasourceInUse     = errors.New("datasource is referenced by project")
 	ErrQueryAlreadyRunning = errors.New("same query is already running")
 	ErrSecretEncryptFailed = errors.New("secret encrypt failed")
@@ -67,11 +71,12 @@ func (s *TenantService) Create(ctx context.Context, input CreateTenantInput) (*m
 	return tenant, nil
 }
 
-func (s *TenantService) List(ctx context.Context, page int, pageSize int) (PageResult[model.Tenant], error) {
+func (s *TenantService) List(ctx context.Context, userID uint64, page int, pageSize int) (PageResult[model.Tenant], error) {
 	p := NewPage(page, pageSize)
-	items, total, err := s.tenantRepo.List(ctx, p)
+	items, total, err := s.tenantRepo.List(ctx, userID, p)
 	if err != nil {
 		s.logger.Error("tenant list failed",
+			zap.Uint64("user_id", userID),
 			zap.Int("page", p.Page),
 			zap.Int("page_size", p.Limit()),
 			zap.Error(err),

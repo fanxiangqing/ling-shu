@@ -85,11 +85,13 @@ func New(deps Dependencies) *gin.Engine {
 
 		tenants := v1.Group("/tenants")
 		{
-			tenants.GET("", deps.TenantHandler.List)
+			tenants.GET("", middleware.AuthRequired(deps.TokenManager), deps.TenantHandler.List)
 			tenants.POST("", deps.TenantHandler.Create)
 			tenants.POST("/:tenant_id/users", append(authz("tenant.manage", middleware.RequireTenantScope()), deps.AuthHandler.CreateTenantUser)...)
 			tenants.GET("/:tenant_id/members", append(authz("tenant.manage", middleware.RequireTenantScope()), deps.AuthHandler.ListTenantMembers)...)
 			tenants.POST("/:tenant_id/members", append(authz("tenant.manage", middleware.RequireTenantScope()), deps.AuthHandler.AddTenantMember)...)
+			tenants.PATCH("/:tenant_id/members/:member_id/status", append(authz("tenant.manage", middleware.RequireTenantScope()), deps.AuthHandler.UpdateTenantMemberStatus)...)
+			tenants.DELETE("/:tenant_id/members/:member_id", append(authz("tenant.manage", middleware.RequireTenantScope()), deps.AuthHandler.DeleteTenantMember)...)
 			tenants.GET("/:tenant_id/datasources", append(authz("datasource.manage", middleware.RequireTenantScope()), deps.DatasourceHandler.List)...)
 			tenants.POST("/:tenant_id/datasources", append(authz("datasource.manage", middleware.RequireTenantScope()), deps.DatasourceHandler.Create)...)
 			tenants.GET("/:tenant_id/chat/sessions", append(authz("chat.use", middleware.RequireTenantScope()), deps.ChatHandler.ListSessions)...)
@@ -98,11 +100,13 @@ func New(deps Dependencies) *gin.Engine {
 
 		projects := v1.Group("/projects")
 		{
-			projects.GET("", deps.ProjectHandler.List)
+			projects.GET("", middleware.AuthRequired(deps.TokenManager), deps.ProjectHandler.List)
 			projects.POST("", append(authz("project.manage", middleware.RequireTenantScope()), deps.ProjectHandler.Create)...)
 			projects.DELETE("/:project_id", append(authz("project.manage", middleware.RequireProjectScope()), deps.ProjectHandler.Delete)...)
 			projects.GET("/:project_id/members", append(authz("project.manage", middleware.RequireProjectScope()), deps.AuthHandler.ListProjectMembers)...)
 			projects.POST("/:project_id/members", append(authz("project.manage", middleware.RequireProjectScope()), deps.AuthHandler.AddProjectMember)...)
+			projects.PATCH("/:project_id/members/:member_id/status", append(authz("project.manage", middleware.RequireProjectScope()), deps.AuthHandler.UpdateProjectMemberStatus)...)
+			projects.DELETE("/:project_id/members/:member_id", append(authz("project.manage", middleware.RequireProjectScope()), deps.AuthHandler.DeleteProjectMember)...)
 			projects.GET("/:project_id/llm-config", append(authz("project.manage", middleware.RequireProjectScope()), deps.ProviderConfigHandler.GetLLM)...)
 			projects.PUT("/:project_id/llm-config", append(authz("project.manage", middleware.RequireProjectScope()), deps.ProviderConfigHandler.UpsertLLM)...)
 			projects.GET("/:project_id/asr-config", append(authz("project.manage", middleware.RequireProjectScope()), deps.ProviderConfigHandler.GetASR)...)

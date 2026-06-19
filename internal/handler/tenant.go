@@ -43,7 +43,7 @@ func (h *TenantHandler) Create(c *gin.Context) {
 
 func (h *TenantHandler) List(c *gin.Context) {
 	page, pageSize := pageParams(c)
-	result, err := h.tenantService.List(c.Request.Context(), page, pageSize)
+	result, err := h.tenantService.List(c.Request.Context(), authenticatedUserID(c), page, pageSize)
 	if err != nil {
 		writeError(c, err)
 		return

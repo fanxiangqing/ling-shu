@@ -38,7 +38,7 @@ The backend keeps the core analytics flow clear and modular: project management,
 - RAG over business terms, metric definitions, and FewShot SQL examples.
 - Provider-based LLM, ASR, and TTS integrations. The current implementation focuses on Alibaba Cloud.
 - Realtime VoiceBI: streaming ASR input and streaming TTS playback.
-- RBAC roles for SuperAdmin, TenantAdmin, ProjectAdmin, Analyst, and Viewer.
+- RBAC roles for SuperAdmin, TenantAdmin, ProjectAdmin, Analyst, and Viewer; tenant/project members can be enabled, disabled, and removed, while the primary tenant admin is protected.
 - Vue 3 + TypeScript + Naive UI frontend.
 
 ## Tech Stack
@@ -261,8 +261,8 @@ All business APIs are under:
 Common modules:
 
 - `/auth/*` user registration and login
-- `/tenants/*` tenant and tenant member management
-- `/projects/*` projects, members, provider config, knowledge, RAG
+- `/tenants/*` tenant and tenant member management, including member enable/disable/delete
+- `/projects/*` projects, project member authorization, provider config, knowledge, RAG
 - `/datasources/*` data source test, metadata sync, metadata preview
 - `/chat/*` sessions, messages, streaming message API, realtime voice API
 - `/query/*` SQL review, execution, and history

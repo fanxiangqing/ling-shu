@@ -14,6 +14,7 @@ import type {
   KBTermRecord,
   KBFewShotRecord,
   LoginResult,
+  MemberRecord,
   MetadataColumnRecord,
   MetadataTableRecord,
   PageResult,
@@ -53,7 +54,8 @@ export const authApi = {
   async login(payload: { username: string; password: string }) {
     const result = await request<LoginResult>('/auth/login', {
       method: 'POST',
-      body: jsonBody(payload)
+      body: jsonBody(payload),
+      skipUnauthorizedRedirect: true
     })
     setToken(result.access_token)
     return result
@@ -62,10 +64,19 @@ export const authApi = {
     return request<PageResult<UserRecord>>(`/auth/users${queryString(params)}`)
   },
   listTenantMembers(tenantId: number, params: PageParams = {}) {
-    return request<PageResult<Record<string, unknown>>>(`/tenants/${tenantId}/members${queryString(params)}`)
+    return request<PageResult<MemberRecord>>(`/tenants/${tenantId}/members${queryString(params)}`)
   },
   addTenantMember(tenantId: number, payload: { user_id: number }) {
     return request(`/tenants/${tenantId}/members`, { method: 'POST', body: jsonBody(payload) })
+  },
+  updateTenantMemberStatus(tenantId: number, memberId: number, payload: { status: string }) {
+    return request<{ status: string }>(`/tenants/${tenantId}/members/${memberId}/status`, {
+      method: 'PATCH',
+      body: jsonBody(payload)
+    })
+  },
+  deleteTenantMember(tenantId: number, memberId: number) {
+    return request<{ status: string }>(`/tenants/${tenantId}/members/${memberId}`, { method: 'DELETE' })
   },
   createTenantUser(tenantId: number, payload: {
     username: string
@@ -81,8 +92,20 @@ export const authApi = {
     return request(`/projects/${projectId}/members`, { method: 'POST', body: jsonBody(payload) })
   },
   listProjectMembers(projectId: number, tenantId: number, params: PageParams = {}) {
-    return request<PageResult<Record<string, unknown>>>(
+    return request<PageResult<MemberRecord>>(
       `/projects/${projectId}/members${queryString({ tenant_id: tenantId, ...params })}`
+    )
+  },
+  updateProjectMemberStatus(projectId: number, tenantId: number, memberId: number, payload: { status: string }) {
+    return request<{ status: string }>(
+      `/projects/${projectId}/members/${memberId}/status${queryString({ tenant_id: tenantId })}`,
+      { method: 'PATCH', body: jsonBody({ tenant_id: tenantId, ...payload }) }
+    )
+  },
+  deleteProjectMember(projectId: number, tenantId: number, memberId: number) {
+    return request<{ status: string }>(
+      `/projects/${projectId}/members/${memberId}${queryString({ tenant_id: tenantId })}`,
+      { method: 'DELETE' }
     )
   }
 }

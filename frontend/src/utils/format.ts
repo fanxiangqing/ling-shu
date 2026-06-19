@@ -125,22 +125,39 @@ export function tableScrollX(columns: Array<{ width?: number }>) {
   return columns.reduce((sum, column) => sum + (column.width ?? DEFAULT_COLUMN_MIN_WIDTH), 0)
 }
 
-export function recordText(row: Record<string, unknown>, key: string, fallback = '') {
-  const value = row[key]
+export function recordText(row: object, key: string, fallback = '') {
+  const value = (row as Record<string, unknown>)[key]
   if (value === null || value === undefined || value === '') return fallback
   return String(value)
 }
 
-export function memberDisplayName(row: Record<string, unknown>) {
+export function memberDisplayName(row: object) {
   return recordText(row, 'display_name') || recordText(row, 'username') || `成员 #${recordText(row, 'user_id', recordText(row, 'id', '-'))}`
 }
 
-export function memberAccountName(row: Record<string, unknown>) {
+export function memberAccountName(row: object) {
   return recordText(row, 'username') || `用户 #${recordText(row, 'user_id', '-')}`
 }
 
-export function memberStatus(row: Record<string, unknown>) {
+export function memberStatus(row: object) {
   return recordText(row, 'status', 'active')
+}
+
+export function memberStatusLabel(row: object) {
+  switch (memberStatus(row)) {
+    case 'active':
+      return '启用'
+    case 'inactive':
+    case 'disabled':
+    case 'paused':
+      return '停用'
+    default:
+      return memberStatus(row)
+  }
+}
+
+export function memberStatusTagType(row: object): 'success' | 'warning' | 'default' {
+  return memberStatus(row) === 'active' ? 'success' : 'warning'
 }
 
 export function termAliases(term: KBTermRecord) {

@@ -116,12 +116,13 @@ func (s *ProjectService) Delete(ctx context.Context, input DeleteProjectInput) e
 	return nil
 }
 
-func (s *ProjectService) List(ctx context.Context, tenantID uint64, page int, pageSize int) (PageResult[model.Project], error) {
+func (s *ProjectService) List(ctx context.Context, tenantID uint64, userID uint64, page int, pageSize int) (PageResult[model.Project], error) {
 	p := NewPage(page, pageSize)
-	items, total, err := s.projectRepo.List(ctx, tenantID, p)
+	items, total, err := s.projectRepo.List(ctx, tenantID, userID, p)
 	if err != nil {
 		s.logger.Error("project list failed",
 			zap.Uint64("tenant_id", tenantID),
+			zap.Uint64("user_id", userID),
 			zap.Int("page", p.Page),
 			zap.Int("page_size", p.Limit()),
 			zap.Error(err),

@@ -201,6 +201,17 @@ export interface UserRecord extends BaseRecord {
   status?: string
 }
 
+export interface MemberRecord extends BaseRecord {
+  tenant_id: number
+  project_id?: number
+  user_id: number
+  username: string
+  email?: string
+  mobile?: string
+  display_name?: string
+  status?: string
+}
+
 export interface LoginResult {
   access_token: string
   token_type: string

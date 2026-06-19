@@ -1,8 +1,8 @@
 import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { authApi, permissionApi } from '@/api/resources'
-import type { PageResult, UserRecord } from '@/types/domain'
-import { emptyPage } from '@/utils/format'
+import type { MemberRecord, PageResult, UserRecord } from '@/types/domain'
+import { emptyPage, memberDisplayName, memberStatus } from '@/utils/format'
 import { fetchAllPages } from '@/utils/pagination'
 import { useWorkspaceStore } from '@/stores/workspace'
 
@@ -22,10 +22,10 @@ export const useMemberStore = defineStore('member', () => {
 
   const users = ref<PageResult<UserRecord>>(emptyPage())
   const userOptionItems = ref<UserRecord[]>([])
-  const tenantMemberOptionItems = ref<Record<string, unknown>[]>([])
+  const tenantMemberOptionItems = ref<MemberRecord[]>([])
   const tenantMemberOptionTenantId = ref(0)
-  const tenantMembers = ref<PageResult<Record<string, unknown>>>(emptyPage())
-  const projectMembers = ref<PageResult<Record<string, unknown>>>(emptyPage())
+  const tenantMembers = ref<PageResult<MemberRecord>>(emptyPage())
+  const projectMembers = ref<PageResult<MemberRecord>>(emptyPage())
 
   const memberInviteModalVisible = ref(false)
   const projectMemberModalVisible = ref(false)
@@ -46,7 +46,7 @@ export const useMemberStore = defineStore('member', () => {
   )
   const userOptions = computed(() => {
     if (ws.context.tenantId) {
-      return tenantMemberOptionRecords.value.map((member) => ({
+      return tenantMemberOptionRecords.value.filter((member) => memberStatus(member) === 'active').map((member) => ({
         label: `${String(member.display_name || member.username || '成员')} / ${String(member.username || member.user_id || '')}`,
         value: Number(member.user_id || member.id || 0)
       })).filter((option) => option.value > 0)
@@ -85,7 +85,7 @@ export const useMemberStore = defineStore('member', () => {
     }
     const tenantResult = await ws.run('刷新组织成员', () => authApi.listTenantMembers(ws.context.tenantId, ws.pageParams('tenantMembers')), options)
     if (tenantResult) {
-      tenantMembers.value = tenantResult as PageResult<Record<string, unknown>>
+      tenantMembers.value = tenantResult as PageResult<MemberRecord>
       ws.syncPage('tenantMembers', tenantMembers.value)
       await refreshTenantMemberOptions()
     }
@@ -95,7 +95,7 @@ export const useMemberStore = defineStore('member', () => {
     }
     const projectResult = await ws.run('刷新项目成员', () => authApi.listProjectMembers(ws.context.projectId, ws.context.tenantId, ws.pageParams('projectMembers')), options)
     if (projectResult) {
-      projectMembers.value = projectResult as PageResult<Record<string, unknown>>
+      projectMembers.value = projectResult as PageResult<MemberRecord>
       ws.syncPage('projectMembers', projectMembers.value)
     }
   }
@@ -112,10 +112,10 @@ export const useMemberStore = defineStore('member', () => {
     }
     const result = await ws.run(
       '刷新组织成员选项',
-      () => fetchAllPages<Record<string, unknown>>((params) => authApi.listTenantMembers(ws.context.tenantId, params)),
+      () => fetchAllPages<MemberRecord>((params) => authApi.listTenantMembers(ws.context.tenantId, params)),
       { silent: true, successMessage: false }
     )
-    if (result) tenantMemberOptionItems.value = result as Record<string, unknown>[]
+    if (result) tenantMemberOptionItems.value = result as MemberRecord[]
   }
 
   async function createTenantAccount() {
@@ -156,6 +156,62 @@ export const useMemberStore = defineStore('member', () => {
     await refreshMembers()
   }
 
+  async function updateTenantMemberStatus(member: MemberRecord, status: 'active' | 'inactive') {
+    if (!ws.ensureTenant()) return
+    const id = Number(member.id || 0)
+    if (!id) return
+    const result = await ws.run(
+      status === 'active' ? '启用组织成员' : '停用组织成员',
+      () => authApi.updateTenantMemberStatus(ws.context.tenantId, id, { status }),
+      { successMessage: `${memberDisplayName(member)} 已${status === 'active' ? '启用' : '停用'}` }
+    )
+    if (result) await refreshMembers({ silent: true })
+  }
+
+  async function toggleTenantMemberStatus(member: MemberRecord) {
+    await updateTenantMemberStatus(member, memberStatus(member) === 'active' ? 'inactive' : 'active')
+  }
+
+  async function deleteTenantMember(member: MemberRecord) {
+    if (!ws.ensureTenant()) return
+    const id = Number(member.id || 0)
+    if (!id) return
+    const result = await ws.run(
+      '删除组织成员',
+      () => authApi.deleteTenantMember(ws.context.tenantId, id),
+      { successMessage: `${memberDisplayName(member)} 已从组织移除` }
+    )
+    if (result) await refreshMembers({ silent: true })
+  }
+
+  async function updateProjectMemberStatus(member: MemberRecord, status: 'active' | 'inactive') {
+    if (!ws.ensureProject()) return
+    const id = Number(member.id || 0)
+    if (!id) return
+    const result = await ws.run(
+      status === 'active' ? '启用项目成员' : '停用项目成员',
+      () => authApi.updateProjectMemberStatus(ws.context.projectId, ws.context.tenantId, id, { status }),
+      { successMessage: `${memberDisplayName(member)} 已${status === 'active' ? '启用' : '停用'}` }
+    )
+    if (result) await refreshMembers({ silent: true })
+  }
+
+  async function toggleProjectMemberStatus(member: MemberRecord) {
+    await updateProjectMemberStatus(member, memberStatus(member) === 'active' ? 'inactive' : 'active')
+  }
+
+  async function deleteProjectMember(member: MemberRecord) {
+    if (!ws.ensureProject()) return
+    const id = Number(member.id || 0)
+    if (!id) return
+    const result = await ws.run(
+      '移除项目成员',
+      () => authApi.deleteProjectMember(ws.context.projectId, ws.context.tenantId, id),
+      { successMessage: `${memberDisplayName(member)} 已移出当前项目` }
+    )
+    if (result) await refreshMembers({ silent: true })
+  }
+
   return {
     users,
     userOptionItems,
@@ -171,6 +227,12 @@ export const useMemberStore = defineStore('member', () => {
     refreshTenantMemberOptions,
     refreshMembers,
     createTenantAccount,
-    addProjectMember
+    addProjectMember,
+    updateTenantMemberStatus,
+    toggleTenantMemberStatus,
+    deleteTenantMember,
+    updateProjectMemberStatus,
+    toggleProjectMemberStatus,
+    deleteProjectMember
   }
 })

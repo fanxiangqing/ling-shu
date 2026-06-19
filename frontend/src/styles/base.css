@@ -921,7 +921,7 @@ textarea {
 
 .member-card {
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) auto;
+  grid-template-columns: 38px minmax(0, 1fr) minmax(188px, auto);
   gap: 10px;
   align-items: center;
   min-width: 0;
@@ -934,6 +934,30 @@ textarea {
     background 0.16s ease,
     box-shadow 0.16s ease,
     transform 0.16s ease;
+}
+
+.member-card-main {
+  min-width: 0;
+}
+
+.member-card-controls {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.member-card-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.member-card-actions .n-button {
+  min-width: 0;
 }
 
 .member-card:hover {
@@ -973,10 +997,6 @@ textarea {
   margin-top: 3px;
   color: #73837c;
   font-size: 12px;
-}
-
-.member-card .n-tag {
-  justify-self: end;
 }
 
 .member-directory-surface,
@@ -3615,9 +3635,11 @@ h2 {
     grid-template-columns: 38px minmax(0, 1fr);
   }
 
-  .member-card .n-tag {
+  .member-card-controls {
     grid-column: 2;
     justify-self: start;
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 
   .project-scope-card div {

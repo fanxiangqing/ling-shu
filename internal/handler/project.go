@@ -52,7 +52,7 @@ func (h *ProjectHandler) List(c *gin.Context) {
 	page, pageSize := pageParams(c)
 	tenantID := parseUint64Default(c.Query("tenant_id"), 0)
 
-	result, err := h.projectService.List(c.Request.Context(), tenantID, page, pageSize)
+	result, err := h.projectService.List(c.Request.Context(), tenantID, authenticatedUserID(c), page, pageSize)
 	if err != nil {
 		writeError(c, err)
 		return

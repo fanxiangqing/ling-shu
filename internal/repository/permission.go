@@ -88,7 +88,7 @@ func (r *GormPermissionRepository) ListRoleBindings(ctx context.Context, filter 
 	if r.db == nil {
 		return nil, 0, ErrDatabaseDisabled
 	}
-	query := roleBindingQuery(r.db.WithContext(ctx), filter)
+	query := roleBindingQuery(r.db.WithContext(ctx), filter, false)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -105,7 +105,7 @@ func (r *GormPermissionRepository) GetUserRoles(ctx context.Context, filter Role
 		return nil, ErrDatabaseDisabled
 	}
 	var rows []RoleBindingRow
-	if err := roleBindingQuery(r.db.WithContext(ctx), filter).Order("roles.id ASC").Scan(&rows).Error; err != nil {
+	if err := roleBindingQuery(r.db.WithContext(ctx), filter, true).Order("roles.id ASC").Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil
@@ -122,17 +122,22 @@ func (r *GormPermissionRepository) GetUserPermissions(ctx context.Context, filte
 		Joins("JOIN role_permissions ON role_permissions.role_id = roles.id").
 		Joins("JOIN permissions ON permissions.id = role_permissions.permission_id")
 	query = applyRoleBindingScope(query, filter)
+	query = applyActiveRoleScope(query, filter)
 	if err := query.Order("permissions.resource ASC, permissions.action ASC").Scan(&permissions).Error; err != nil {
 		return nil, err
 	}
 	return permissions, nil
 }
 
-func roleBindingQuery(db *gorm.DB, filter RoleBindingFilter) *gorm.DB {
+func roleBindingQuery(db *gorm.DB, filter RoleBindingFilter, requireActiveScope bool) *gorm.DB {
 	query := db.Table("role_bindings").
 		Select("role_bindings.id, role_bindings.user_id, role_bindings.role_id, roles.code AS role_code, roles.name AS role_name, roles.scope_type, role_bindings.tenant_id, role_bindings.project_id, role_bindings.created_by").
 		Joins("JOIN roles ON roles.id = role_bindings.role_id")
-	return applyRoleBindingScope(query, filter)
+	query = applyRoleBindingScope(query, filter)
+	if requireActiveScope {
+		query = applyActiveRoleScope(query, filter)
+	}
+	return query
 }
 
 func applyRoleBindingScope(query *gorm.DB, filter RoleBindingFilter) *gorm.DB {
@@ -146,4 +151,23 @@ func applyRoleBindingScope(query *gorm.DB, filter RoleBindingFilter) *gorm.DB {
 		query = query.Where("(role_bindings.tenant_id = ? OR (role_bindings.tenant_id IS NULL OR role_bindings.tenant_id = 0))", filter.TenantID)
 	}
 	return query
+}
+
+func applyActiveRoleScope(query *gorm.DB, filter RoleBindingFilter) *gorm.DB {
+	query = query.Joins("JOIN users ON users.id = role_bindings.user_id AND users.status = ? AND users.deleted_at IS NULL", "active")
+	if filter.TenantID == 0 {
+		return query.Where("roles.scope_type = ?", "global")
+	}
+	tenantActive := "EXISTS (SELECT 1 FROM tenant_members tm WHERE tm.tenant_id = ? AND tm.user_id = role_bindings.user_id AND tm.status = 'active' AND tm.deleted_at IS NULL)"
+	if filter.ProjectID == 0 {
+		return query.Where("roles.scope_type = 'global' OR (roles.scope_type = 'tenant' AND "+tenantActive+")", filter.TenantID)
+	}
+	projectActive := "EXISTS (SELECT 1 FROM project_members pm WHERE pm.tenant_id = ? AND pm.project_id = ? AND pm.user_id = role_bindings.user_id AND pm.status = 'active' AND pm.deleted_at IS NULL)"
+	return query.Where(
+		"roles.scope_type = 'global' OR (roles.scope_type = 'tenant' AND "+tenantActive+") OR (roles.scope_type = 'project' AND "+tenantActive+" AND "+projectActive+")",
+		filter.TenantID,
+		filter.TenantID,
+		filter.TenantID,
+		filter.ProjectID,
+	)
 }

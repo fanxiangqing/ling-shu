@@ -38,7 +38,7 @@ Ling-Shu 是一个企业级 ChatBI / Text2SQL / VoiceBI 平台。用户可以用
 - 业务知识 RAG：业务术语、指标口径、FewShot SQL。
 - LLM / ASR / TTS Provider 化，目前重点适配阿里云。
 - VoiceBI：流式 ASR 输入和流式 TTS 播放。
-- RBAC 权限角色：SuperAdmin、TenantAdmin、ProjectAdmin、Analyst、Viewer。
+- RBAC 权限角色：SuperAdmin、TenantAdmin、ProjectAdmin、Analyst、Viewer；组织/项目成员支持启用、停用和移除，主管理员受保护。
 - Vue 3 + TypeScript + Naive UI 前端管理台。
 
 ## 技术栈
@@ -271,8 +271,8 @@ sequenceDiagram
 主要模块：
 
 - `/auth/*` 用户注册和登录
-- `/tenants/*` 租户和租户成员
-- `/projects/*` 项目、成员、Provider 配置、知识库、RAG
+- `/tenants/*` 租户和租户成员，支持成员启用、停用和删除
+- `/projects/*` 项目、项目成员授权、Provider 配置、知识库、RAG
 - `/datasources/*` 数据源测试、元数据同步、元数据预览
 - `/chat/*` 会话、消息、消息流式接口、实时语音接口
 - `/query/*` SQL 审核、执行和历史

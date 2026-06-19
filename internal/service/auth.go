@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"ling-shu/internal/repository"
 
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 type AuthService struct {
@@ -66,6 +68,30 @@ type AddProjectMemberInput struct {
 	TenantID  uint64
 	ProjectID uint64
 	UserID    uint64
+}
+
+type UpdateTenantMemberStatusInput struct {
+	TenantID uint64
+	MemberID uint64
+	Status   string
+}
+
+type DeleteTenantMemberInput struct {
+	TenantID uint64
+	MemberID uint64
+}
+
+type UpdateProjectMemberStatusInput struct {
+	TenantID  uint64
+	ProjectID uint64
+	MemberID  uint64
+	Status    string
+}
+
+type DeleteProjectMemberInput struct {
+	TenantID  uint64
+	ProjectID uint64
+	MemberID  uint64
 }
 
 type AuthOption func(*AuthService)
@@ -215,15 +241,42 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*LoginResult
 			zap.String("username_hash", sqlHash(username)),
 			zap.Error(err),
 		)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrInvalidCredentials
+		}
 		return nil, err
 	}
-	if user.Status != "active" || !authpkg.CheckPassword(user.PasswordHash, password) {
+	if user.Status != "active" {
 		s.logger.Warn("login rejected",
 			zap.Uint64("user_id", user.ID),
 			zap.String("username_hash", sqlHash(username)),
 			zap.String("status", user.Status),
 		)
-		return nil, ErrInvalidInput
+		return nil, ErrUserDisabled
+	}
+	if !authpkg.CheckPassword(user.PasswordHash, password) {
+		s.logger.Warn("login rejected",
+			zap.Uint64("user_id", user.ID),
+			zap.String("username_hash", sqlHash(username)),
+			zap.String("status", user.Status),
+		)
+		return nil, ErrInvalidCredentials
+	}
+	hasWorkspace, err := s.userRepo.HasActiveWorkspace(ctx, user.ID)
+	if err != nil {
+		s.logger.Error("login workspace lookup failed",
+			zap.Uint64("user_id", user.ID),
+			zap.String("username_hash", sqlHash(username)),
+			zap.Error(err),
+		)
+		return nil, err
+	}
+	if !hasWorkspace {
+		s.logger.Warn("login rejected without active workspace",
+			zap.Uint64("user_id", user.ID),
+			zap.String("username_hash", sqlHash(username)),
+		)
+		return nil, ErrNoActiveWorkspace
 	}
 	token, expiresAt, err := s.tokens.Generate(user.ID, user.Username)
 	if err != nil {
@@ -307,6 +360,71 @@ func (s *AuthService) ListTenantMembers(ctx context.Context, tenantID uint64, pa
 	return PageResult[repository.MemberRow]{Items: items, Total: total, Page: p.Page, PageSize: p.Limit()}, nil
 }
 
+func (s *AuthService) UpdateTenantMemberStatus(ctx context.Context, input UpdateTenantMemberStatusInput) error {
+	status := normalizeMemberStatus(input.Status)
+	if input.TenantID == 0 || input.MemberID == 0 || status == "" {
+		return ErrInvalidInput
+	}
+	protected, err := s.userRepo.IsTenantPrimaryAdminMember(ctx, input.TenantID, input.MemberID)
+	if err != nil {
+		s.logger.Error("tenant member primary admin lookup failed",
+			zap.Uint64("tenant_id", input.TenantID),
+			zap.Uint64("member_id", input.MemberID),
+			zap.Error(err),
+		)
+		return err
+	}
+	if protected {
+		return ErrPrimaryAdminLocked
+	}
+	if err := s.userRepo.UpdateTenantMemberStatus(ctx, input.TenantID, input.MemberID, status); err != nil {
+		s.logger.Error("tenant member status update failed",
+			zap.Uint64("tenant_id", input.TenantID),
+			zap.Uint64("member_id", input.MemberID),
+			zap.String("status", status),
+			zap.Error(err),
+		)
+		return err
+	}
+	s.logger.Info("tenant member status updated",
+		zap.Uint64("tenant_id", input.TenantID),
+		zap.Uint64("member_id", input.MemberID),
+		zap.String("status", status),
+	)
+	return nil
+}
+
+func (s *AuthService) DeleteTenantMember(ctx context.Context, input DeleteTenantMemberInput) error {
+	if input.TenantID == 0 || input.MemberID == 0 {
+		return ErrInvalidInput
+	}
+	protected, err := s.userRepo.IsTenantPrimaryAdminMember(ctx, input.TenantID, input.MemberID)
+	if err != nil {
+		s.logger.Error("tenant member primary admin lookup failed",
+			zap.Uint64("tenant_id", input.TenantID),
+			zap.Uint64("member_id", input.MemberID),
+			zap.Error(err),
+		)
+		return err
+	}
+	if protected {
+		return ErrPrimaryAdminLocked
+	}
+	if err := s.userRepo.DeleteTenantMember(ctx, input.TenantID, input.MemberID); err != nil {
+		s.logger.Error("tenant member delete failed",
+			zap.Uint64("tenant_id", input.TenantID),
+			zap.Uint64("member_id", input.MemberID),
+			zap.Error(err),
+		)
+		return err
+	}
+	s.logger.Info("tenant member deleted",
+		zap.Uint64("tenant_id", input.TenantID),
+		zap.Uint64("member_id", input.MemberID),
+	)
+	return nil
+}
+
 func (s *AuthService) AddProjectMember(ctx context.Context, input AddProjectMemberInput) (*model.ProjectMember, error) {
 	if input.TenantID == 0 || input.ProjectID == 0 || input.UserID == 0 {
 		return nil, ErrInvalidInput
@@ -352,6 +470,88 @@ func (s *AuthService) ListProjectMembers(ctx context.Context, tenantID uint64, p
 		return PageResult[repository.MemberRow]{}, err
 	}
 	return PageResult[repository.MemberRow]{Items: items, Total: total, Page: p.Page, PageSize: p.Limit()}, nil
+}
+
+func (s *AuthService) UpdateProjectMemberStatus(ctx context.Context, input UpdateProjectMemberStatusInput) error {
+	status := normalizeMemberStatus(input.Status)
+	if input.TenantID == 0 || input.ProjectID == 0 || input.MemberID == 0 || status == "" {
+		return ErrInvalidInput
+	}
+	protected, err := s.userRepo.IsProjectPrimaryAdminMember(ctx, input.TenantID, input.ProjectID, input.MemberID)
+	if err != nil {
+		s.logger.Error("project member primary admin lookup failed",
+			zap.Uint64("tenant_id", input.TenantID),
+			zap.Uint64("project_id", input.ProjectID),
+			zap.Uint64("member_id", input.MemberID),
+			zap.Error(err),
+		)
+		return err
+	}
+	if protected {
+		return ErrPrimaryAdminLocked
+	}
+	if err := s.userRepo.UpdateProjectMemberStatus(ctx, input.TenantID, input.ProjectID, input.MemberID, status); err != nil {
+		s.logger.Error("project member status update failed",
+			zap.Uint64("tenant_id", input.TenantID),
+			zap.Uint64("project_id", input.ProjectID),
+			zap.Uint64("member_id", input.MemberID),
+			zap.String("status", status),
+			zap.Error(err),
+		)
+		return err
+	}
+	s.logger.Info("project member status updated",
+		zap.Uint64("tenant_id", input.TenantID),
+		zap.Uint64("project_id", input.ProjectID),
+		zap.Uint64("member_id", input.MemberID),
+		zap.String("status", status),
+	)
+	return nil
+}
+
+func (s *AuthService) DeleteProjectMember(ctx context.Context, input DeleteProjectMemberInput) error {
+	if input.TenantID == 0 || input.ProjectID == 0 || input.MemberID == 0 {
+		return ErrInvalidInput
+	}
+	protected, err := s.userRepo.IsProjectPrimaryAdminMember(ctx, input.TenantID, input.ProjectID, input.MemberID)
+	if err != nil {
+		s.logger.Error("project member primary admin lookup failed",
+			zap.Uint64("tenant_id", input.TenantID),
+			zap.Uint64("project_id", input.ProjectID),
+			zap.Uint64("member_id", input.MemberID),
+			zap.Error(err),
+		)
+		return err
+	}
+	if protected {
+		return ErrPrimaryAdminLocked
+	}
+	if err := s.userRepo.DeleteProjectMember(ctx, input.TenantID, input.ProjectID, input.MemberID); err != nil {
+		s.logger.Error("project member delete failed",
+			zap.Uint64("tenant_id", input.TenantID),
+			zap.Uint64("project_id", input.ProjectID),
+			zap.Uint64("member_id", input.MemberID),
+			zap.Error(err),
+		)
+		return err
+	}
+	s.logger.Info("project member deleted",
+		zap.Uint64("tenant_id", input.TenantID),
+		zap.Uint64("project_id", input.ProjectID),
+		zap.Uint64("member_id", input.MemberID),
+	)
+	return nil
+}
+
+func normalizeMemberStatus(input string) string {
+	switch strings.ToLower(strings.TrimSpace(input)) {
+	case "active":
+		return "active"
+	case "inactive", "disabled", "paused":
+		return "inactive"
+	default:
+		return ""
+	}
 }
 
 func signupTenantName(input string, displayName string) string {

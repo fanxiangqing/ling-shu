@@ -35,6 +35,11 @@ type addMemberRequest struct {
 	UserID   uint64 `json:"user_id" binding:"required"`
 }
 
+type updateMemberStatusRequest struct {
+	TenantID uint64 `json:"tenant_id"`
+	Status   string `json:"status" binding:"required"`
+}
+
 type createTenantUserRequest struct {
 	Username    string `json:"username" binding:"required"`
 	Email       string `json:"email"`
@@ -145,6 +150,36 @@ func (h *AuthHandler) ListTenantMembers(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *AuthHandler) UpdateTenantMemberStatus(c *gin.Context) {
+	var req updateMemberStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "invalid request body")
+		return
+	}
+	err := h.authService.UpdateTenantMemberStatus(c.Request.Context(), service.UpdateTenantMemberStatusInput{
+		TenantID: parseUint64Default(c.Param("tenant_id"), req.TenantID),
+		MemberID: parseUint64Default(c.Param("member_id"), 0),
+		Status:   req.Status,
+	})
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	response.Success(c, gin.H{"status": "updated"})
+}
+
+func (h *AuthHandler) DeleteTenantMember(c *gin.Context) {
+	err := h.authService.DeleteTenantMember(c.Request.Context(), service.DeleteTenantMemberInput{
+		TenantID: parseUint64Default(c.Param("tenant_id"), 0),
+		MemberID: parseUint64Default(c.Param("member_id"), 0),
+	})
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	response.Success(c, gin.H{"status": "deleted"})
+}
+
 func (h *AuthHandler) AddProjectMember(c *gin.Context) {
 	var req addMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -177,6 +212,38 @@ func (h *AuthHandler) ListProjectMembers(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
+}
+
+func (h *AuthHandler) UpdateProjectMemberStatus(c *gin.Context) {
+	var req updateMemberStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "invalid request body")
+		return
+	}
+	err := h.authService.UpdateProjectMemberStatus(c.Request.Context(), service.UpdateProjectMemberStatusInput{
+		TenantID:  parseUint64Default(c.Query("tenant_id"), req.TenantID),
+		ProjectID: parseUint64Default(c.Param("project_id"), 0),
+		MemberID:  parseUint64Default(c.Param("member_id"), 0),
+		Status:    req.Status,
+	})
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	response.Success(c, gin.H{"status": "updated"})
+}
+
+func (h *AuthHandler) DeleteProjectMember(c *gin.Context) {
+	err := h.authService.DeleteProjectMember(c.Request.Context(), service.DeleteProjectMemberInput{
+		TenantID:  parseUint64Default(c.Query("tenant_id"), 0),
+		ProjectID: parseUint64Default(c.Param("project_id"), 0),
+		MemberID:  parseUint64Default(c.Param("member_id"), 0),
+	})
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	response.Success(c, gin.H{"status": "deleted"})
 }
 
 func (h *AuthHandler) ListUsers(c *gin.Context) {

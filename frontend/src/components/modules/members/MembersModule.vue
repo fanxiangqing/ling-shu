@@ -5,7 +5,8 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { useUiStore } from '@/stores/ui'
 import { useProjectStore } from '@/stores/project'
 import { useMemberStore, projectRoleOptions, tenantRoleOptions } from '@/stores/member'
-import { memberAccountName, memberDisplayName, memberStatus, pageSize, showPagination } from '@/utils/format'
+import { pageSize, showPagination } from '@/utils/format'
+import MemberCard from '@/components/modules/members/MemberCard.vue'
 
 const workspace = useWorkspaceStore()
 const ui = useUiStore()
@@ -65,14 +66,14 @@ const {
           </NSpace>
         </div>
         <div class="member-card-list">
-          <article v-for="member in tenantMembers.items" :key="String(member.id)" class="member-card">
-            <div class="member-avatar">{{ memberDisplayName(member).slice(0, 1).toUpperCase() }}</div>
-            <div>
-              <strong>{{ memberDisplayName(member) }}</strong>
-              <span>{{ memberAccountName(member) }}</span>
-            </div>
-            <NTag size="small" :type="memberStatus(member) === 'active' ? 'success' : 'default'">{{ memberStatus(member) }}</NTag>
-          </article>
+          <MemberCard
+            v-for="member in tenantMembers.items"
+            :key="String(member.id)"
+            :member="member"
+            scope="tenant"
+            @toggle-status="memberStore.toggleTenantMemberStatus"
+            @delete="memberStore.deleteTenantMember"
+          />
           <div v-if="!tenantMembers.items.length" class="knowledge-empty-mini">暂无组织成员</div>
         </div>
         <div v-if="showPagination(tenantMembers)" class="pager-row compact">
@@ -118,14 +119,14 @@ const {
           </div>
         </div>
         <div class="member-card-list">
-          <article v-for="member in projectMembers.items" :key="String(member.id)" class="member-card">
-            <div class="member-avatar">{{ memberDisplayName(member).slice(0, 1).toUpperCase() }}</div>
-            <div>
-              <strong>{{ memberDisplayName(member) }}</strong>
-              <span>{{ memberAccountName(member) }}</span>
-            </div>
-            <NTag size="small" :type="memberStatus(member) === 'active' ? 'success' : 'default'">{{ memberStatus(member) }}</NTag>
-          </article>
+          <MemberCard
+            v-for="member in projectMembers.items"
+            :key="String(member.id)"
+            :member="member"
+            scope="project"
+            @toggle-status="memberStore.toggleProjectMemberStatus"
+            @delete="memberStore.deleteProjectMember"
+          />
           <div v-if="!projectMembers.items.length" class="knowledge-empty-mini">当前项目暂无成员</div>
         </div>
         <div v-if="showPagination(projectMembers)" class="pager-row compact">
@@ -181,14 +182,14 @@ const {
         <div>
           <h2 class="sub-title">组织账号池</h2>
           <div class="member-card-list">
-            <article v-for="member in tenantMembers.items" :key="String(member.id)" class="member-card">
-              <div class="member-avatar">{{ memberDisplayName(member).slice(0, 1).toUpperCase() }}</div>
-              <div>
-                <strong>{{ memberDisplayName(member) }}</strong>
-                <span>{{ memberAccountName(member) }}</span>
-              </div>
-              <NTag size="small" :type="memberStatus(member) === 'active' ? 'success' : 'default'">{{ memberStatus(member) }}</NTag>
-            </article>
+            <MemberCard
+              v-for="member in tenantMembers.items"
+              :key="String(member.id)"
+              :member="member"
+              scope="tenant"
+              @toggle-status="memberStore.toggleTenantMemberStatus"
+              @delete="memberStore.deleteTenantMember"
+            />
             <div v-if="!tenantMembers.items.length" class="knowledge-empty-mini">暂无组织成员</div>
           </div>
           <div v-if="showPagination(tenantMembers)" class="pager-row compact">
@@ -203,14 +204,14 @@ const {
         <div>
           <h2 class="sub-title">当前项目成员</h2>
           <div class="member-card-list">
-            <article v-for="member in projectMembers.items" :key="String(member.id)" class="member-card">
-              <div class="member-avatar">{{ memberDisplayName(member).slice(0, 1).toUpperCase() }}</div>
-              <div>
-                <strong>{{ memberDisplayName(member) }}</strong>
-                <span>{{ memberAccountName(member) }}</span>
-              </div>
-              <NTag size="small" :type="memberStatus(member) === 'active' ? 'success' : 'default'">{{ memberStatus(member) }}</NTag>
-            </article>
+            <MemberCard
+              v-for="member in projectMembers.items"
+              :key="String(member.id)"
+              :member="member"
+              scope="project"
+              @toggle-status="memberStore.toggleProjectMemberStatus"
+              @delete="memberStore.deleteProjectMember"
+            />
             <div v-if="!projectMembers.items.length" class="knowledge-empty-mini">当前项目暂无成员</div>
           </div>
           <div v-if="showPagination(projectMembers)" class="pager-row compact">

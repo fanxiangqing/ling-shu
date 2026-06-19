@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,12 +17,19 @@ type UserRepository interface {
 	CreateTenantAccount(ctx context.Context, user *model.User, member *model.TenantMember, roleCode string, createdBy uint64) error
 	GetByID(ctx context.Context, id uint64) (*model.User, error)
 	GetByUsername(ctx context.Context, username string) (*model.User, error)
+	HasActiveWorkspace(ctx context.Context, userID uint64) (bool, error)
 	List(ctx context.Context, page Page) ([]model.User, int64, error)
 	UpdateLastLogin(ctx context.Context, id uint64, at time.Time) error
 	AddTenantMember(ctx context.Context, member *model.TenantMember) error
 	ListTenantMembers(ctx context.Context, tenantID uint64, page Page) ([]MemberRow, int64, error)
+	IsTenantPrimaryAdminMember(ctx context.Context, tenantID uint64, memberID uint64) (bool, error)
+	UpdateTenantMemberStatus(ctx context.Context, tenantID uint64, memberID uint64, status string) error
+	DeleteTenantMember(ctx context.Context, tenantID uint64, memberID uint64) error
 	AddProjectMember(ctx context.Context, member *model.ProjectMember) error
 	ListProjectMembers(ctx context.Context, tenantID uint64, projectID uint64, page Page) ([]MemberRow, int64, error)
+	IsProjectPrimaryAdminMember(ctx context.Context, tenantID uint64, projectID uint64, memberID uint64) (bool, error)
+	UpdateProjectMemberStatus(ctx context.Context, tenantID uint64, projectID uint64, memberID uint64, status string) error
+	DeleteProjectMember(ctx context.Context, tenantID uint64, projectID uint64, memberID uint64) error
 }
 
 type MemberRow struct {
@@ -171,6 +179,24 @@ func (r *GormUserRepository) GetByUsername(ctx context.Context, username string)
 	return &user, nil
 }
 
+func (r *GormUserRepository) HasActiveWorkspace(ctx context.Context, userID uint64) (bool, error) {
+	if r.db == nil {
+		return false, ErrDatabaseDisabled
+	}
+	var count int64
+	err := r.db.WithContext(ctx).Table("users").
+		Where("users.id = ? AND users.status = ? AND users.deleted_at IS NULL", userID, "active").
+		Where(
+			"(EXISTS (SELECT 1 FROM tenant_members tm WHERE tm.user_id = users.id AND tm.status = 'active' AND tm.deleted_at IS NULL) OR EXISTS (SELECT 1 FROM role_bindings rb JOIN roles r ON r.id = rb.role_id WHERE rb.user_id = users.id AND r.code = 'super_admin'))",
+		).
+		Count(&count).
+		Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func (r *GormUserRepository) List(ctx context.Context, page Page) ([]model.User, int64, error) {
 	if r.db == nil {
 		return nil, 0, ErrDatabaseDisabled
@@ -198,6 +224,33 @@ func (r *GormUserRepository) AddTenantMember(ctx context.Context, member *model.
 	if r.db == nil {
 		return ErrDatabaseDisabled
 	}
+	var existing model.TenantMember
+	err := r.db.WithContext(ctx).
+		Unscoped().
+		Where("tenant_id = ? AND user_id = ?", member.TenantID, member.UserID).
+		First(&existing).
+		Error
+	if err == nil {
+		status := member.Status
+		if status == "" {
+			status = "active"
+		}
+		if err := r.db.WithContext(ctx).
+			Unscoped().
+			Model(&model.TenantMember{}).
+			Where("id = ?", existing.ID).
+			Updates(map[string]any{"status": status, "deleted_at": nil}).
+			Error; err != nil {
+			return err
+		}
+		existing.Status = status
+		existing.DeletedAt = gorm.DeletedAt{}
+		*member = existing
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
 	return r.db.WithContext(ctx).Create(member).Error
 }
 
@@ -207,13 +260,15 @@ func (r *GormUserRepository) ListTenantMembers(ctx context.Context, tenantID uin
 	}
 	query := r.db.WithContext(ctx).Table("tenant_members").
 		Joins("JOIN users ON users.id = tenant_members.user_id").
-		Where("tenant_members.tenant_id = ?", tenantID)
+		Where("tenant_members.tenant_id = ?", tenantID).
+		Where("tenant_members.deleted_at IS NULL").
+		Where("users.deleted_at IS NULL")
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var rows []MemberRow
-	if err := query.Select("tenant_members.id, tenant_members.tenant_id, tenant_members.user_id, users.username, users.display_name, users.email, users.mobile, tenant_members.status").
+	if err := query.Select("tenant_members.id, tenant_members.tenant_id, tenant_members.user_id, users.username, users.display_name, users.email, users.mobile, CASE WHEN users.status <> 'active' THEN users.status ELSE tenant_members.status END AS status").
 		Order("tenant_members.id DESC").
 		Offset(page.Offset()).
 		Limit(page.Limit()).
@@ -223,9 +278,81 @@ func (r *GormUserRepository) ListTenantMembers(ctx context.Context, tenantID uin
 	return rows, total, nil
 }
 
+func (r *GormUserRepository) IsTenantPrimaryAdminMember(ctx context.Context, tenantID uint64, memberID uint64) (bool, error) {
+	if r.db == nil {
+		return false, ErrDatabaseDisabled
+	}
+	var count int64
+	err := r.db.WithContext(ctx).Table("tenant_members").
+		Joins("JOIN role_bindings ON role_bindings.user_id = tenant_members.user_id AND role_bindings.tenant_id = tenant_members.tenant_id").
+		Joins("JOIN roles ON roles.id = role_bindings.role_id").
+		Where("tenant_members.tenant_id = ? AND tenant_members.id = ?", tenantID, memberID).
+		Where("roles.code = ? AND (role_bindings.created_by = tenant_members.user_id OR tenant_members.id = (SELECT MIN(tm.id) FROM tenant_members tm WHERE tm.tenant_id = tenant_members.tenant_id AND tm.deleted_at IS NULL))", "tenant_admin").
+		Count(&count).
+		Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (r *GormUserRepository) UpdateTenantMemberStatus(ctx context.Context, tenantID uint64, memberID uint64, status string) error {
+	if r.db == nil {
+		return ErrDatabaseDisabled
+	}
+	var member model.TenantMember
+	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, memberID).First(&member).Error; err != nil {
+		return err
+	}
+	return r.db.WithContext(ctx).Model(&member).Update("status", status).Error
+}
+
+func (r *GormUserRepository) DeleteTenantMember(ctx context.Context, tenantID uint64, memberID uint64) error {
+	if r.db == nil {
+		return ErrDatabaseDisabled
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var member model.TenantMember
+		if err := tx.Where("tenant_id = ? AND id = ?", tenantID, memberID).First(&member).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("tenant_id = ? AND user_id = ?", tenantID, member.UserID).Delete(&model.ProjectMember{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&member).Error
+	})
+}
+
 func (r *GormUserRepository) AddProjectMember(ctx context.Context, member *model.ProjectMember) error {
 	if r.db == nil {
 		return ErrDatabaseDisabled
+	}
+	var existing model.ProjectMember
+	err := r.db.WithContext(ctx).
+		Unscoped().
+		Where("tenant_id = ? AND project_id = ? AND user_id = ?", member.TenantID, member.ProjectID, member.UserID).
+		First(&existing).
+		Error
+	if err == nil {
+		status := member.Status
+		if status == "" {
+			status = "active"
+		}
+		if err := r.db.WithContext(ctx).
+			Unscoped().
+			Model(&model.ProjectMember{}).
+			Where("id = ?", existing.ID).
+			Updates(map[string]any{"status": status, "deleted_at": nil}).
+			Error; err != nil {
+			return err
+		}
+		existing.Status = status
+		existing.DeletedAt = gorm.DeletedAt{}
+		*member = existing
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
 	}
 	return r.db.WithContext(ctx).Create(member).Error
 }
@@ -236,13 +363,17 @@ func (r *GormUserRepository) ListProjectMembers(ctx context.Context, tenantID ui
 	}
 	query := r.db.WithContext(ctx).Table("project_members").
 		Joins("JOIN users ON users.id = project_members.user_id").
-		Where("project_members.tenant_id = ? AND project_members.project_id = ?", tenantID, projectID)
+		Joins("JOIN tenant_members ON tenant_members.tenant_id = project_members.tenant_id AND tenant_members.user_id = project_members.user_id").
+		Where("project_members.tenant_id = ? AND project_members.project_id = ?", tenantID, projectID).
+		Where("project_members.deleted_at IS NULL").
+		Where("tenant_members.deleted_at IS NULL").
+		Where("users.deleted_at IS NULL")
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var rows []MemberRow
-	if err := query.Select("project_members.id, project_members.tenant_id, project_members.project_id, project_members.user_id, users.username, users.display_name, users.email, users.mobile, project_members.status").
+	if err := query.Select("project_members.id, project_members.tenant_id, project_members.project_id, project_members.user_id, users.username, users.display_name, users.email, users.mobile, CASE WHEN users.status <> 'active' THEN users.status WHEN tenant_members.status <> 'active' THEN tenant_members.status ELSE project_members.status END AS status").
 		Order("project_members.id DESC").
 		Offset(page.Offset()).
 		Limit(page.Limit()).
@@ -250,4 +381,44 @@ func (r *GormUserRepository) ListProjectMembers(ctx context.Context, tenantID ui
 		return nil, 0, err
 	}
 	return rows, total, nil
+}
+
+func (r *GormUserRepository) IsProjectPrimaryAdminMember(ctx context.Context, tenantID uint64, projectID uint64, memberID uint64) (bool, error) {
+	if r.db == nil {
+		return false, ErrDatabaseDisabled
+	}
+	var count int64
+	err := r.db.WithContext(ctx).Table("project_members").
+		Joins("JOIN role_bindings ON role_bindings.user_id = project_members.user_id AND role_bindings.tenant_id = project_members.tenant_id").
+		Joins("JOIN roles ON roles.id = role_bindings.role_id").
+		Where("project_members.tenant_id = ? AND project_members.project_id = ? AND project_members.id = ?", tenantID, projectID, memberID).
+		Where("roles.code = ? AND (role_bindings.created_by = project_members.user_id OR EXISTS (SELECT 1 FROM tenant_members tm WHERE tm.tenant_id = project_members.tenant_id AND tm.user_id = project_members.user_id AND tm.id = (SELECT MIN(tm2.id) FROM tenant_members tm2 WHERE tm2.tenant_id = project_members.tenant_id AND tm2.deleted_at IS NULL)))", "tenant_admin").
+		Count(&count).
+		Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (r *GormUserRepository) UpdateProjectMemberStatus(ctx context.Context, tenantID uint64, projectID uint64, memberID uint64, status string) error {
+	if r.db == nil {
+		return ErrDatabaseDisabled
+	}
+	var member model.ProjectMember
+	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND project_id = ? AND id = ?", tenantID, projectID, memberID).First(&member).Error; err != nil {
+		return err
+	}
+	return r.db.WithContext(ctx).Model(&member).Update("status", status).Error
+}
+
+func (r *GormUserRepository) DeleteProjectMember(ctx context.Context, tenantID uint64, projectID uint64, memberID uint64) error {
+	if r.db == nil {
+		return ErrDatabaseDisabled
+	}
+	var member model.ProjectMember
+	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND project_id = ? AND id = ?", tenantID, projectID, memberID).First(&member).Error; err != nil {
+		return err
+	}
+	return r.db.WithContext(ctx).Delete(&member).Error
 }

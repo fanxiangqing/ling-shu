@@ -124,6 +124,14 @@ func resolveUserID(c *gin.Context, fallback uint64) uint64 {
 func writeError(c *gin.Context, err error) {
 	_ = c.Error(err)
 	switch {
+	case errors.Is(err, service.ErrInvalidCredentials):
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "invalid username or password")
+	case errors.Is(err, service.ErrUserDisabled):
+		response.Error(c, http.StatusForbidden, response.CodeForbidden, "user is disabled")
+	case errors.Is(err, service.ErrNoActiveWorkspace):
+		response.Error(c, http.StatusForbidden, response.CodeForbidden, "user has no active workspace")
+	case errors.Is(err, service.ErrPrimaryAdminLocked):
+		response.Error(c, http.StatusConflict, response.CodeConflict, "primary admin cannot be modified")
 	case errors.Is(err, service.ErrInvalidInput):
 		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "invalid input")
 	case errors.Is(err, service.ErrDatasourceInUse):

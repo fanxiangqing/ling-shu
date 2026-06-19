@@ -12,7 +12,7 @@ import (
 type ProjectRepository interface {
 	Create(ctx context.Context, project *model.Project) error
 	CreateWithBindings(ctx context.Context, project *model.Project, datasourceIDs []uint64, createdBy uint64) error
-	List(ctx context.Context, tenantID uint64, page Page) ([]model.Project, int64, error)
+	List(ctx context.Context, tenantID uint64, userID uint64, page Page) ([]model.Project, int64, error)
 	GetByID(ctx context.Context, id uint64) (*model.Project, error)
 	Delete(ctx context.Context, tenantID uint64, projectID uint64) error
 }
@@ -98,7 +98,7 @@ func bindProjectRoleInTx(tx *gorm.DB, userID uint64, roleCode string, tenantID u
 	}).Error
 }
 
-func (r *GormProjectRepository) List(ctx context.Context, tenantID uint64, page Page) ([]model.Project, int64, error) {
+func (r *GormProjectRepository) List(ctx context.Context, tenantID uint64, userID uint64, page Page) ([]model.Project, int64, error) {
 	if r.db == nil {
 		return nil, 0, ErrDatabaseDisabled
 	}
@@ -106,6 +106,14 @@ func (r *GormProjectRepository) List(ctx context.Context, tenantID uint64, page 
 	query := r.db.WithContext(ctx).Model(&model.Project{})
 	if tenantID > 0 {
 		query = query.Where("tenant_id = ?", tenantID)
+	}
+	if userID > 0 {
+		activeTenantMember := "EXISTS (SELECT 1 FROM tenant_members tm WHERE tm.tenant_id = projects.tenant_id AND tm.user_id = ? AND tm.status = 'active' AND tm.deleted_at IS NULL)"
+		tenantAdmin := "EXISTS (SELECT 1 FROM role_bindings rb JOIN roles r ON r.id = rb.role_id WHERE rb.user_id = ? AND rb.tenant_id = projects.tenant_id AND r.code = 'tenant_admin')"
+		projectMember := "EXISTS (SELECT 1 FROM project_members pm WHERE pm.tenant_id = projects.tenant_id AND pm.project_id = projects.id AND pm.user_id = ? AND pm.status = 'active' AND pm.deleted_at IS NULL)"
+		superAdmin := "EXISTS (SELECT 1 FROM role_bindings rb JOIN roles r ON r.id = rb.role_id WHERE rb.user_id = ? AND r.code = 'super_admin')"
+		query = query.Where("EXISTS (SELECT 1 FROM users u WHERE u.id = ? AND u.status = 'active' AND u.deleted_at IS NULL)", userID).
+			Where("("+superAdmin+" OR ("+activeTenantMember+" AND ("+tenantAdmin+" OR "+projectMember+")))", userID, userID, userID, userID)
 	}
 
 	var total int64
