@@ -109,15 +109,19 @@ configs/           Configuration examples
 docs/              Architecture and design notes
 frontend/          Vue 3 frontend
 internal/          Application modules
+  aliyun/          Alibaba Cloud SDK integrations (e.g. NLS)
   asr/             ASR providers
-  audit/           Audit domain
-  chat/            Chat module
+  audit/           Audit domain types
+  auth/            Password hashing and token utilities
+  bootstrap/       Server assembly and dependency wiring
+  cache/           Redis client and distributed lock
+  config/          Configuration loading
+  database/        MySQL/GORM connection
   datasource/      Data source drivers and metadata sync
   handler/         HTTP and realtime handlers
   llm/             LLM providers
   middleware/      Gin middleware
   model/           GORM models
-  permission/      RBAC permissions
   query/           ReAct agent and SQL execution
   rag/             RAG and Milvus integration
   repository/      Persistence layer
@@ -125,6 +129,9 @@ internal/          Application modules
   service/         Business services
   tts/             TTS providers
 pkg/               Shared packages
+  log/             Logging utilities
+  response/        Unified API response
+  secret/          Secret encryption codec
 prompts/           Prompt templates
 scripts/mysql/     MySQL schema scripts
 deploy/            Kubernetes manifests

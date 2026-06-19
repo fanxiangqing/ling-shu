@@ -109,15 +109,19 @@ configs/           配置示例
 docs/              架构与设计文档
 frontend/          Vue 3 前端
 internal/          业务模块
+  aliyun/          阿里云 SDK 集成（如 NLS）
   asr/             ASR Provider
-  audit/           审计
-  chat/            对话模块
+  audit/           审计类型定义
+  auth/            密码哈希与 Token 工具
+  bootstrap/       服务组装与依赖装配
+  cache/           Redis 客户端与分布式锁
+  config/          配置加载
+  database/        MySQL/GORM 连接
   datasource/      数据源插件与元数据同步
   handler/         HTTP 和实时接口
   llm/             LLM Provider
   middleware/      Gin 中间件
   model/           GORM Model
-  permission/      RBAC 权限
   query/           ReAct Agent 与 SQL 执行
   rag/             RAG 与 Milvus
   repository/      数据访问层
@@ -125,6 +129,9 @@ internal/          业务模块
   service/         业务服务层
   tts/             TTS Provider
 pkg/               公共包
+  log/             日志工具
+  response/        统一响应封装
+  secret/          密钥加解密
 prompts/           Prompt 模板
 scripts/mysql/     MySQL 初始化脚本
 deploy/            Kubernetes 配置

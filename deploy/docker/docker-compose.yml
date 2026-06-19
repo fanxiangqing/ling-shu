@@ -1,0 +1,172 @@
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: ling-shu-api:${LING_SHU_IMAGE_TAG:-latest}
+    container_name: ling-shu-api
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_started
+    environment:
+      LING_SHU_APP_ENV: production
+      LING_SHU_SERVER_HOST: 0.0.0.0
+      LING_SHU_SERVER_PORT: 8080
+      LING_SHU_SERVER_MODE: release
+      LING_SHU_LOG_LEVEL: ${LING_SHU_LOG_LEVEL:-info}
+      LING_SHU_LOG_ENCODING: json
+      LING_SHU_DATABASE_ENABLED: "true"
+      LING_SHU_MYSQL_DSN: ${LING_SHU_MYSQL_DSN:-root:${MYSQL_ROOT_PASSWORD:-change-me}@tcp(mysql:3306)/ling_shu?charset=utf8mb4&parseTime=true&loc=Local}
+      LING_SHU_REDIS_ENABLED: "true"
+      LING_SHU_REDIS_ADDR: redis:6379
+      LING_SHU_REDIS_RATE_LIMIT_ENABLED: "true"
+      LING_SHU_REDIS_RATE_LIMIT_REQUESTS: 120
+      LING_SHU_REDIS_RATE_LIMIT_WINDOW: 1m
+      LING_SHU_REDIS_QUERY_LOCK_ENABLED: "true"
+      LING_SHU_REDIS_QUERY_LOCK_TTL: 30s
+      LING_SHU_REDIS_METADATA_CACHE_ENABLED: "true"
+      LING_SHU_REDIS_METADATA_CACHE_TTL: 10m
+      LING_SHU_MILVUS_ENABLED: ${LING_SHU_MILVUS_ENABLED:-true}
+      LING_SHU_MILVUS_ADDR: milvus:19530
+      LING_SHU_JWT_SECRET: ${LING_SHU_JWT_SECRET:?LING_SHU_JWT_SECRET is required}
+      LING_SHU_DSN_SECRET: ${LING_SHU_DSN_SECRET:?LING_SHU_DSN_SECRET is required}
+      LING_SHU_ALIYUN_API_KEY: ${LING_SHU_ALIYUN_API_KEY:-}
+      LING_SHU_ASR_ENABLED: ${LING_SHU_ASR_ENABLED:-false}
+      LING_SHU_TTS_ENABLED: ${LING_SHU_TTS_ENABLED:-false}
+      ALIYUN_AK_ID: ${ALIYUN_AK_ID:-}
+      ALIYUN_AK_SECRET: ${ALIYUN_AK_SECRET:-}
+      LING_SHU_ALIYUN_NLS_APP_KEY: ${LING_SHU_ALIYUN_NLS_APP_KEY:-}
+    ports:
+      - "${LING_SHU_API_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+    networks:
+      - ling-shu
+
+  web:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+    image: ling-shu-web:${LING_SHU_IMAGE_TAG:-latest}
+    container_name: ling-shu-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${LING_SHU_WEB_PORT:-80}:80"
+    networks:
+      - ling-shu
+
+  mysql:
+    image: mysql:8.4
+    container_name: ling-shu-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change-me}
+      MYSQL_DATABASE: ling_shu
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+08:00
+    ports:
+      - "${LING_SHU_MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ../../scripts/mysql/001_init_schema.sql:/docker-entrypoint-initdb.d/001_init_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - ling-shu
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: ling-shu-redis
+    restart: unless-stopped
+    ports:
+      - "${LING_SHU_REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    networks:
+      - ling-shu
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: ling-shu-etcd
+    restart: unless-stopped
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    networks:
+      - ling-shu
+
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: ling-shu-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - ling-shu
+
+  milvus:
+    image: milvusdb/milvus:v2.2.9
+    container_name: ling-shu-milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    ports:
+      - "${LING_SHU_MILVUS_PORT:-19530}:19530"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      - etcd
+      - minio
+    networks:
+      - ling-shu
+
+volumes:
+  mysql_data:
+  redis_data:
+  etcd_data:
+  minio_data:
+  milvus_data:
+
+networks:
+  ling-shu:
+    driver: bridge
