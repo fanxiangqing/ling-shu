@@ -192,6 +192,37 @@ Frontend integration example:
 
 The SDK defaults to a bottom-right floating launcher. The desktop modal leaves more room for tables, SQL, and voice interaction results; mobile layouts expand close to full-screen. `position` accepts `bottom-right`, `bottom-left`, `top-right`, or `top-left`, and `launcher.title` overrides the launcher label.
 
+Business flow:
+
+```mermaid
+flowchart TD
+    A["Project admin<br/>creates embed app"] --> B["Ling-Shu<br/>generates app_id / app_secret"]
+    B --> C["Third-party backend<br/>stores app_secret"]
+    B --> D["Third-party frontend<br/>loads JS SDK"]
+    D --> E["LingShuEmbed.init<br/>appId + key + position + tokenProvider"]
+    E --> F["Floating bot appears"]
+    F --> G["User clicks bot"]
+    G --> H["SDK calls tokenProvider"]
+    H --> I["Third-party backend reads login session<br/>external_user_id / external_user_name"]
+    I --> J["POST /api/v1/embed/token"]
+    C --> J
+    J --> K["Ling-Shu validates app_secret<br/>issues short-lived embed token"]
+    K --> L["SDK creates iframe<br/>/embed/:app_id?key=...#token=..."]
+    L --> M["iframe calls<br/>/api/v1/embed/bootstrap"]
+    M --> N{"Session policy"}
+    N -->|user| O["Reuse by<br/>app_id + external_user_id"]
+    N -->|context| P["Reuse by<br/>app_id + external_user_id + key"]
+    N -->|new| Q["Create new session<br/>on each bootstrap"]
+    O --> R["Bind or create chat_session"]
+    P --> R
+    Q --> R
+    R --> S["Return datasources / session ID<br/>ASR/TTS capabilities"]
+    S --> T["Text ChatBI via SSE"]
+    S --> U["Realtime voice via WebSocket"]
+    T --> V["Render result in iframe"]
+    U --> V
+```
+
 The repository also includes a dependency-free temporary third-party system demo: [examples/embed-third-party-demo](examples/embed-third-party-demo). It uses Node.js to simulate the third-party backend token endpoint and plain HTML to load the Ling-Shu JS SDK, which is useful for validating a real integration path. After creating an embed app, add `http://localhost:8099` to the allowed origins, then run:
 
 ```bash
