@@ -199,6 +199,16 @@ func New(deps Dependencies) *gin.Engine {
 			embed.GET("/chat/sessions/:session_id/messages", deps.EmbedHandler.ListMessages)
 			embed.POST("/chat/sessions/:session_id/messages/stream", deps.EmbedHandler.StreamMessage)
 			embed.GET("/chat/sessions/:session_id/voice/realtime", deps.EmbedHandler.RealtimeVoice)
+
+			serverEmbed := embed.Group("/server")
+			{
+				serverEmbed.POST("/sessions", deps.EmbedHandler.ServerCreateSession)
+				serverEmbed.POST("/chat", deps.EmbedHandler.ServerChat)
+				serverEmbed.POST("/chat/stream", deps.EmbedHandler.ServerChatStream)
+				serverEmbed.GET("/sessions/:session_id/messages", deps.EmbedHandler.ServerListMessages)
+				serverEmbed.POST("/sessions/:session_id/messages", deps.EmbedHandler.ServerSendMessage)
+				serverEmbed.POST("/sessions/:session_id/messages/stream", deps.EmbedHandler.ServerStreamMessage)
+			}
 		}
 	}
 

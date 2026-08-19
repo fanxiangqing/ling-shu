@@ -76,6 +76,23 @@ type BootstrapEmbedInput struct {
 	ParentOrigin string
 }
 
+type BootstrapEmbedServerInput struct {
+	AppID            string
+	AppSecret        string
+	ExternalUserID   string
+	ExternalUserName string
+	SessionKey       string
+	SessionMode      string
+}
+
+type ValidateEmbedServerSessionInput struct {
+	AppID            string
+	AppSecret        string
+	ExternalUserID   string
+	ExternalUserName string
+	ChatSessionID    uint64
+}
+
 type EmbedBootstrapResult struct {
 	App          EmbedAppView        `json:"app"`
 	TenantID     uint64              `json:"tenant_id"`
@@ -255,19 +272,9 @@ func (s *EmbedService) CreateToken(ctx context.Context, input CreateEmbedTokenIn
 	if s == nil || s.embedRepo == nil || len(s.tokenSecret) == 0 {
 		return nil, ErrInvalidInput
 	}
-	app, err := s.embedRepo.GetAppByAppID(ctx, strings.TrimSpace(input.AppID))
+	app, externalUserID, externalUserName, err := s.authenticateEmbedSubject(ctx, input.AppID, input.AppSecret, input.ExternalUserID, input.ExternalUserName)
 	if err != nil {
 		return nil, err
-	}
-	if app.Status != "active" {
-		return nil, ErrEmbedAppDisabled
-	}
-	if !hmac.Equal([]byte(app.SecretHash), []byte(hashSecret(input.AppSecret))) {
-		return nil, ErrEmbedSecretInvalid
-	}
-	externalUserID := trimRunes(strings.TrimSpace(input.ExternalUserID), 191)
-	if externalUserID == "" {
-		return nil, ErrInvalidInput
 	}
 	ttl := time.Duration(input.TTLSeconds) * time.Second
 	if ttl <= 0 {
@@ -280,7 +287,7 @@ func (s *EmbedService) CreateToken(ctx context.Context, input CreateEmbedTokenIn
 	claims := embedTokenClaims{
 		AppID:            app.AppID,
 		ExternalUserID:   externalUserID,
-		ExternalUserName: trimRunes(strings.TrimSpace(input.ExternalUserName), 128),
+		ExternalUserName: externalUserName,
 		IssuedAt:         now.Unix(),
 		Expires:          now.Add(ttl).Unix(),
 	}
@@ -292,6 +299,33 @@ func (s *EmbedService) CreateToken(ctx context.Context, input CreateEmbedTokenIn
 		AccessToken: token,
 		TokenType:   "Bearer",
 		ExpiresAt:   now.Add(ttl),
+	}, nil
+}
+
+func (s *EmbedService) BootstrapServer(ctx context.Context, input BootstrapEmbedServerInput) (*EmbedBootstrapResult, *EmbedAccess, error) {
+	app, externalUserID, externalUserName, err := s.authenticateEmbedSubject(ctx, input.AppID, input.AppSecret, input.ExternalUserID, input.ExternalUserName)
+	if err != nil {
+		return nil, nil, err
+	}
+	key, mode := resolveEmbedSession(app.SessionPolicy, input.SessionKey, input.SessionMode)
+	embedSession, chatSession, err := s.embedRepo.EnsureSession(ctx, repository.EnsureEmbedSessionInput{
+		App:              app,
+		ExternalUserID:   externalUserID,
+		ExternalUserName: externalUserName,
+		SessionKey:       key,
+		SessionMode:      mode,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	result, err := s.bootstrapResult(ctx, app, embedSession, chatSession, externalUserID, externalUserName)
+	if err != nil {
+		return nil, nil, err
+	}
+	return result, &EmbedAccess{
+		App:            app,
+		EmbedSession:   embedSession,
+		ExternalUserID: externalUserID,
 	}, nil
 }
 
@@ -317,24 +351,7 @@ func (s *EmbedService) Bootstrap(ctx context.Context, input BootstrapEmbedInput)
 	if err != nil {
 		return nil, err
 	}
-	datasources, err := s.projectDatasources(ctx, app.TenantID, app.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	return &EmbedBootstrapResult{
-		App:          appView(app),
-		TenantID:     app.TenantID,
-		ProjectID:    app.ProjectID,
-		UserID:       chatSession.UserID,
-		SessionID:    chatSession.ID,
-		SessionKey:   embedSession.SessionKey,
-		Datasources:  datasources,
-		Capabilities: s.capabilities(ctx, app.TenantID, app.ProjectID),
-		Identity: EmbedIdentityResult{
-			ExternalUserID:   claims.ExternalUserID,
-			ExternalUserName: claims.ExternalUserName,
-		},
-	}, nil
+	return s.bootstrapResult(ctx, app, embedSession, chatSession, claims.ExternalUserID, claims.ExternalUserName)
 }
 
 func (s *EmbedService) ValidateSessionAccess(ctx context.Context, accessToken string, chatSessionID uint64) (*EmbedAccess, error) {
@@ -356,6 +373,84 @@ func (s *EmbedService) ValidateSessionAccess(ctx context.Context, accessToken st
 		App:            app,
 		EmbedSession:   embedSession,
 		ExternalUserID: claims.ExternalUserID,
+	}, nil
+}
+
+func (s *EmbedService) ValidateServerSessionAccess(ctx context.Context, input ValidateEmbedServerSessionInput) (*EmbedAccess, error) {
+	app, externalUserID, _, err := s.authenticateEmbedSubject(ctx, input.AppID, input.AppSecret, input.ExternalUserID, input.ExternalUserName)
+	if err != nil {
+		return nil, err
+	}
+	if input.ChatSessionID == 0 {
+		return nil, ErrInvalidInput
+	}
+	embedSession, err := s.embedRepo.GetSessionByChatSessionID(ctx, input.ChatSessionID)
+	if err != nil {
+		return nil, err
+	}
+	if embedSession.EmbedAppID != app.ID || embedSession.ExternalUserID != externalUserID {
+		return nil, ErrEmbedTokenInvalid
+	}
+	return &EmbedAccess{
+		App:            app,
+		EmbedSession:   embedSession,
+		ExternalUserID: externalUserID,
+	}, nil
+}
+
+func (s *EmbedService) authenticateEmbedSubject(ctx context.Context, appID string, appSecret string, externalUserID string, externalUserName string) (*model.EmbedApp, string, string, error) {
+	if s == nil || s.embedRepo == nil {
+		return nil, "", "", ErrInvalidInput
+	}
+	app, err := s.authenticateAppSecret(ctx, appID, appSecret)
+	if err != nil {
+		return nil, "", "", err
+	}
+	externalUserID = trimRunes(strings.TrimSpace(externalUserID), 191)
+	if externalUserID == "" {
+		return nil, "", "", ErrInvalidInput
+	}
+	return app, externalUserID, trimRunes(strings.TrimSpace(externalUserName), 128), nil
+}
+
+func (s *EmbedService) authenticateAppSecret(ctx context.Context, appID string, appSecret string) (*model.EmbedApp, error) {
+	if s == nil || s.embedRepo == nil {
+		return nil, ErrInvalidInput
+	}
+	app, err := s.embedRepo.GetAppByAppID(ctx, strings.TrimSpace(appID))
+	if err != nil {
+		return nil, err
+	}
+	if app.Status != "active" {
+		return nil, ErrEmbedAppDisabled
+	}
+	if !hmac.Equal([]byte(app.SecretHash), []byte(hashSecret(appSecret))) {
+		return nil, ErrEmbedSecretInvalid
+	}
+	return app, nil
+}
+
+func (s *EmbedService) bootstrapResult(ctx context.Context, app *model.EmbedApp, embedSession *model.EmbedSession, chatSession *model.ChatSession, externalUserID string, externalUserName string) (*EmbedBootstrapResult, error) {
+	if app == nil || embedSession == nil || chatSession == nil {
+		return nil, ErrInvalidInput
+	}
+	datasources, err := s.projectDatasources(ctx, app.TenantID, app.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	return &EmbedBootstrapResult{
+		App:          appView(app),
+		TenantID:     app.TenantID,
+		ProjectID:    app.ProjectID,
+		UserID:       chatSession.UserID,
+		SessionID:    chatSession.ID,
+		SessionKey:   embedSession.SessionKey,
+		Datasources:  datasources,
+		Capabilities: s.capabilities(ctx, app.TenantID, app.ProjectID),
+		Identity: EmbedIdentityResult{
+			ExternalUserID:   externalUserID,
+			ExternalUserName: externalUserName,
+		},
 	}, nil
 }
 

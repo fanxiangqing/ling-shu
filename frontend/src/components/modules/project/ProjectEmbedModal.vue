@@ -11,6 +11,8 @@ import {
   NPopconfirm,
   NSelect,
   NSpace,
+  NTabPane,
+  NTabs,
   NTag
 } from 'naive-ui'
 import { RotateCw, Settings2 } from '@lucide/vue'
@@ -83,7 +85,38 @@ const resp = await fetch("${origin.value}/api/v1/embed/token", {
   })
 })
 const body = await resp.json()
-return body.data.access_token`
+if (!resp.ok || body.code !== 0) throw new Error(body.message || "Ling-Shu Token 签发失败")
+return { access_token: body.data.access_token }`
+}
+
+function browserIntegrationExample(app: EmbedAppRecord, secret = '只在创建后展示一次，请替换为你的真实 secret') {
+  return `${integrationCode(app)}
+
+${tokenServerExample(app, secret)}`
+}
+
+function serverChatExample(app: EmbedAppRecord, secret = '只在创建后展示一次，请替换为你的真实 secret') {
+  return `// 示例：第三方系统后端直接调用问数
+async function askLingShu(currentUser, question, contextKey) {
+  const resp = await fetch("${origin.value}/api/v1/embed/server/chat", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Ling-Shu-App-Id": "${app.app_id}",
+      "X-Ling-Shu-App-Secret": "${secret}",
+      "X-Ling-Shu-External-User-Id": currentUser.id,
+      "X-Ling-Shu-External-User-Name": currentUser.name
+    },
+    body: JSON.stringify({
+      key: contextKey || "dashboard:123",
+      content: question,
+      max_rows: 200
+    })
+  })
+  const body = await resp.json()
+  if (!resp.ok || body.code !== 0) throw new Error(body.message || "Ling-Shu 问数失败")
+  return body.data
+}`
 }
 
 function displayedSecret(app: EmbedAppRecord) {
@@ -375,7 +408,7 @@ async function copyText(text: string) {
             <header>
               <div>
                 <strong>{{ app.name }}</strong>
-                <p>{{ app.app_id }}</p>
+                <p class="embed-app-id">{{ app.app_id }}</p>
               </div>
               <div class="embed-app-tags">
                 <NTag size="small" round>{{ policyLabel(app.session_policy) }}</NTag>
@@ -392,7 +425,12 @@ async function copyText(text: string) {
               <NButton size="small" type="primary" secondary :disabled="app.status === 'disabled'" @click="openIntegrationTest(app)">
                 集成测试
               </NButton>
-              <NButton size="small" secondary @click="copyText(integrationCode(app))">复制 SDK 代码</NButton>
+              <NButton size="small" secondary @click="copyText(browserIntegrationExample(app, displayedSecret(app) || undefined))">
+                复制页面内嵌
+              </NButton>
+              <NButton size="small" secondary @click="copyText(serverChatExample(app, displayedSecret(app) || undefined))">
+                复制服务端调用
+              </NButton>
               <NButton
                 v-if="app.status === 'disabled'"
                 size="small"
@@ -419,9 +457,53 @@ async function copyText(text: string) {
               </NPopconfirm>
             </NSpace>
             <details class="embed-code-block">
-              <summary>查看集成代码</summary>
-              <pre>{{ integrationCode(app) }}</pre>
-              <pre>{{ tokenServerExample(app, displayedSecret(app) || undefined) }}</pre>
+              <summary>查看集成方式</summary>
+              <NTabs type="segment" size="small" animated class="embed-integration-tabs">
+                <NTabPane name="browser" tab="页面内嵌">
+                  <div class="embed-integration-panel">
+                    <div class="embed-integration-head">
+                      <div class="embed-integration-copy">
+                        <strong>SDK 悬浮机器人</strong>
+                        <span>三方页面加载脚本，三方后端签发短期 Token。</span>
+                      </div>
+                      <NButton
+                        size="tiny"
+                        secondary
+                        @click="copyText(browserIntegrationExample(app, displayedSecret(app) || undefined))"
+                      >
+                        复制全部
+                      </NButton>
+                    </div>
+                    <div class="embed-code-stack">
+                      <pre class="embed-code-panel">{{ integrationCode(app) }}</pre>
+                      <pre class="embed-code-panel">{{ tokenServerExample(app, displayedSecret(app) || undefined) }}</pre>
+                    </div>
+                  </div>
+                </NTabPane>
+                <NTabPane name="server" tab="服务端调用">
+                  <div class="embed-integration-panel">
+                    <div class="embed-integration-head">
+                      <div class="embed-integration-copy">
+                        <strong>后端直连问数</strong>
+                        <span>三方后端调用问数接口，自有页面渲染回答、表格和图表。</span>
+                      </div>
+                      <NButton
+                        size="tiny"
+                        secondary
+                        @click="copyText(serverChatExample(app, displayedSecret(app) || undefined))"
+                      >
+                        复制代码
+                      </NButton>
+                    </div>
+                    <ul class="embed-integration-notes">
+                      <li>Secret 只保存在三方后端；流式输出可改用 /api/v1/embed/server/chat/stream。</li>
+                    </ul>
+                    <div class="embed-code-stack">
+                      <pre class="embed-code-panel">{{ serverChatExample(app, displayedSecret(app) || undefined) }}</pre>
+                    </div>
+                  </div>
+                </NTabPane>
+              </NTabs>
             </details>
           </article>
         </div>

@@ -59,6 +59,40 @@ type embedSendMessageRequest struct {
 	AutoExecute           bool     `json:"auto_execute"`
 }
 
+type embedServerSessionRequest struct {
+	AppID            string `json:"app_id"`
+	AppSecret        string `json:"app_secret"`
+	ExternalUserID   string `json:"external_user_id"`
+	ExternalUserName string `json:"external_user_name"`
+	SessionKey       string `json:"key"`
+	SessionMode      string `json:"session_mode"`
+}
+
+type embedServerMessageRequest struct {
+	AppID            string `json:"app_id"`
+	AppSecret        string `json:"app_secret"`
+	ExternalUserID   string `json:"external_user_id"`
+	ExternalUserName string `json:"external_user_name"`
+	SessionKey       string `json:"key"`
+	SessionMode      string `json:"session_mode"`
+	Content          string `json:"content" binding:"required"`
+	MaxRows          int    `json:"max_rows"`
+	AutoExecute      *bool  `json:"auto_execute"`
+}
+
+type embedServerSessionResult struct {
+	AppID            string `json:"app_id"`
+	SessionID        uint64 `json:"session_id"`
+	SessionKey       string `json:"session_key"`
+	ExternalUserID   string `json:"external_user_id"`
+	ExternalUserName string `json:"external_user_name,omitempty"`
+}
+
+type embedServerChatResult struct {
+	Session *embedServerSessionResult      `json:"session,omitempty"`
+	Result  *service.SendChatMessageResult `json:"result"`
+}
+
 func NewEmbedHandler(embedService *service.EmbedService, chatService *service.ChatService, voiceService *service.VoiceService) *EmbedHandler {
 	return &EmbedHandler{embedService: embedService, chatService: chatService, voiceService: voiceService}
 }
@@ -179,9 +213,119 @@ func (h *EmbedHandler) Bootstrap(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *EmbedHandler) ServerCreateSession(c *gin.Context) {
+	var req embedServerSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "invalid request body")
+		return
+	}
+	result, _, err := h.embedService.BootstrapServer(c.Request.Context(), service.BootstrapEmbedServerInput{
+		AppID:            embedServerAppID(c, req.AppID),
+		AppSecret:        embedServerAppSecret(c, req.AppSecret),
+		ExternalUserID:   embedServerExternalUserID(c, req.ExternalUserID),
+		ExternalUserName: embedServerExternalUserName(c, req.ExternalUserName),
+		SessionKey:       req.SessionKey,
+		SessionMode:      req.SessionMode,
+	})
+	if err != nil {
+		writeEmbedError(c, err)
+		return
+	}
+	response.Success(c, embedServerSessionView(result))
+}
+
+func (h *EmbedHandler) ServerChat(c *gin.Context) {
+	var req embedServerMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "invalid request body")
+		return
+	}
+	session, access, err := h.embedService.BootstrapServer(c.Request.Context(), service.BootstrapEmbedServerInput{
+		AppID:            embedServerAppID(c, req.AppID),
+		AppSecret:        embedServerAppSecret(c, req.AppSecret),
+		ExternalUserID:   embedServerExternalUserID(c, req.ExternalUserID),
+		ExternalUserName: embedServerExternalUserName(c, req.ExternalUserName),
+		SessionKey:       req.SessionKey,
+		SessionMode:      req.SessionMode,
+	})
+	if err != nil {
+		writeEmbedError(c, err)
+		return
+	}
+	result, err := h.sendServerChatMessage(c, access, req, nil)
+	if err != nil {
+		writeEmbedError(c, err)
+		return
+	}
+	response.Success(c, embedServerChatResult{Session: embedServerSessionView(session), Result: result})
+}
+
+func (h *EmbedHandler) ServerChatStream(c *gin.Context) {
+	var req embedServerMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "invalid request body")
+		return
+	}
+	session, access, err := h.embedService.BootstrapServer(c.Request.Context(), service.BootstrapEmbedServerInput{
+		AppID:            embedServerAppID(c, req.AppID),
+		AppSecret:        embedServerAppSecret(c, req.AppSecret),
+		ExternalUserID:   embedServerExternalUserID(c, req.ExternalUserID),
+		ExternalUserName: embedServerExternalUserName(c, req.ExternalUserName),
+		SessionKey:       req.SessionKey,
+		SessionMode:      req.SessionMode,
+	})
+	if err != nil {
+		writeEmbedError(c, err)
+		return
+	}
+	writeSSEHeaders(c)
+	sessionView := embedServerSessionView(session)
+	if err := writeSSEvent(c, "session", sessionView); err != nil {
+		_ = c.Error(err)
+		return
+	}
+	result, err := h.sendServerChatMessage(c, access, req, func(event query.AgentEvent) error {
+		return writeSSEvent(c, event.Type, event)
+	})
+	if err != nil {
+		_ = c.Error(err)
+		_ = writeSSEvent(c, query.EventError, streamError{Message: queryAgentErrorMessage(err)})
+		return
+	}
+	_ = writeSSEvent(c, "result", embedServerChatResult{Session: sessionView, Result: result})
+}
+
 func (h *EmbedHandler) ListMessages(c *gin.Context) {
 	sessionID := parseUint64Default(c.Param("session_id"), 0)
 	access, err := h.embedService.ValidateSessionAccess(c.Request.Context(), embedAccessToken(c), sessionID)
+	if err != nil {
+		writeEmbedError(c, err)
+		return
+	}
+	page, pageSize := pageParams(c)
+	result, err := h.chatService.ListMessages(c.Request.Context(), service.ListChatMessagesInput{
+		TenantID:  access.EmbedSession.TenantID,
+		ProjectID: access.EmbedSession.ProjectID,
+		SessionID: sessionID,
+		Page:      page,
+		PageSize:  pageSize,
+	})
+	if err != nil {
+		writeEmbedError(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *EmbedHandler) ServerListMessages(c *gin.Context) {
+	sessionID := parseUint64Default(c.Param("session_id"), 0)
+	access, err := h.embedService.ValidateServerSessionAccess(c.Request.Context(), service.ValidateEmbedServerSessionInput{
+		AppID:            embedServerAppID(c, ""),
+		AppSecret:        embedServerAppSecret(c, ""),
+		ExternalUserID:   embedServerExternalUserID(c, ""),
+		ExternalUserName: embedServerExternalUserName(c, ""),
+		ChatSessionID:    sessionID,
+	})
 	if err != nil {
 		writeEmbedError(c, err)
 		return
@@ -239,6 +383,86 @@ func (h *EmbedHandler) StreamMessage(c *gin.Context) {
 		return
 	}
 	_ = writeSSEvent(c, "result", result)
+}
+
+func (h *EmbedHandler) ServerSendMessage(c *gin.Context) {
+	sessionID := parseUint64Default(c.Param("session_id"), 0)
+	var req embedServerMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "invalid request body")
+		return
+	}
+	access, err := h.embedService.ValidateServerSessionAccess(c.Request.Context(), service.ValidateEmbedServerSessionInput{
+		AppID:            embedServerAppID(c, req.AppID),
+		AppSecret:        embedServerAppSecret(c, req.AppSecret),
+		ExternalUserID:   embedServerExternalUserID(c, req.ExternalUserID),
+		ExternalUserName: embedServerExternalUserName(c, req.ExternalUserName),
+		ChatSessionID:    sessionID,
+	})
+	if err != nil {
+		writeEmbedError(c, err)
+		return
+	}
+	result, err := h.sendServerChatMessage(c, access, req, nil)
+	if err != nil {
+		writeEmbedError(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *EmbedHandler) ServerStreamMessage(c *gin.Context) {
+	sessionID := parseUint64Default(c.Param("session_id"), 0)
+	var req embedServerMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "invalid request body")
+		return
+	}
+	access, err := h.embedService.ValidateServerSessionAccess(c.Request.Context(), service.ValidateEmbedServerSessionInput{
+		AppID:            embedServerAppID(c, req.AppID),
+		AppSecret:        embedServerAppSecret(c, req.AppSecret),
+		ExternalUserID:   embedServerExternalUserID(c, req.ExternalUserID),
+		ExternalUserName: embedServerExternalUserName(c, req.ExternalUserName),
+		ChatSessionID:    sessionID,
+	})
+	if err != nil {
+		writeEmbedError(c, err)
+		return
+	}
+	writeSSEHeaders(c)
+	result, err := h.sendServerChatMessage(c, access, req, func(event query.AgentEvent) error {
+		return writeSSEvent(c, event.Type, event)
+	})
+	if err != nil {
+		_ = c.Error(err)
+		_ = writeSSEvent(c, query.EventError, streamError{Message: queryAgentErrorMessage(err)})
+		return
+	}
+	_ = writeSSEvent(c, "result", result)
+}
+
+func (h *EmbedHandler) sendServerChatMessage(c *gin.Context, access *service.EmbedAccess, req embedServerMessageRequest, emit func(query.AgentEvent) error) (*service.SendChatMessageResult, error) {
+	if access == nil || access.EmbedSession == nil {
+		return nil, service.ErrInvalidInput
+	}
+	meta := requestMetadata(c)
+	input := service.SendChatMessageInput{
+		TenantID:    access.EmbedSession.TenantID,
+		ProjectID:   access.EmbedSession.ProjectID,
+		SessionID:   access.EmbedSession.ChatSessionID,
+		UserID:      access.EmbedSession.UserID,
+		Content:     req.Content,
+		MaxRows:     req.MaxRows,
+		AutoExecute: embedServerAutoExecute(req.AutoExecute),
+		RequestID:   meta.RequestID,
+		IP:          meta.IP,
+		UserAgent:   meta.UserAgent,
+		AuditOrigin: embedServerAuditOrigin(access),
+	}
+	if emit != nil {
+		return h.chatService.StreamMessage(c.Request.Context(), input, emit)
+	}
+	return h.chatService.SendMessage(c.Request.Context(), input)
 }
 
 func (h *EmbedHandler) RealtimeVoice(c *gin.Context) {
@@ -377,6 +601,58 @@ func embedAccessToken(c *gin.Context) string {
 	return strings.TrimSpace(c.Query("embed_token"))
 }
 
+func embedServerAppID(c *gin.Context, fallback string) string {
+	return firstNonEmptyHandler(
+		c.GetHeader("X-Ling-Shu-App-Id"),
+		c.GetHeader("X-Ling-Shu-Embed-App-Id"),
+		c.Query("app_id"),
+		fallback,
+	)
+}
+
+func embedServerAppSecret(c *gin.Context, fallback string) string {
+	return firstNonEmptyHandler(
+		c.GetHeader("X-Ling-Shu-App-Secret"),
+		c.GetHeader("X-Ling-Shu-Embed-App-Secret"),
+		fallback,
+	)
+}
+
+func embedServerExternalUserID(c *gin.Context, fallback string) string {
+	return firstNonEmptyHandler(
+		c.GetHeader("X-Ling-Shu-External-User-Id"),
+		c.GetHeader("X-Ling-Shu-Embed-External-User-Id"),
+		c.Query("external_user_id"),
+		fallback,
+	)
+}
+
+func embedServerExternalUserName(c *gin.Context, fallback string) string {
+	return firstNonEmptyHandler(
+		c.GetHeader("X-Ling-Shu-External-User-Name"),
+		c.GetHeader("X-Ling-Shu-Embed-External-User-Name"),
+		c.Query("external_user_name"),
+		fallback,
+	)
+}
+
+func embedServerAutoExecute(value *bool) bool {
+	return value == nil || *value
+}
+
+func embedServerSessionView(session *service.EmbedBootstrapResult) *embedServerSessionResult {
+	if session == nil {
+		return nil
+	}
+	return &embedServerSessionResult{
+		AppID:            session.App.AppID,
+		SessionID:        session.SessionID,
+		SessionKey:       session.SessionKey,
+		ExternalUserID:   session.Identity.ExternalUserID,
+		ExternalUserName: session.Identity.ExternalUserName,
+	}
+}
+
 func embedAuditOrigin(access *service.EmbedAccess) service.AuditOrigin {
 	if access == nil || access.EmbedSession == nil {
 		return service.AuditOrigin{}
@@ -389,6 +665,12 @@ func embedAuditOrigin(access *service.EmbedAccess) service.AuditOrigin {
 		ExternalUserName: access.EmbedSession.ExternalUserName,
 		SessionKey:       access.EmbedSession.SessionKey,
 	}
+}
+
+func embedServerAuditOrigin(access *service.EmbedAccess) service.AuditOrigin {
+	origin := embedAuditOrigin(access)
+	origin.Source = service.AuditSourceEmbedServer
+	return origin
 }
 
 func writeEmbedError(c *gin.Context, err error) {

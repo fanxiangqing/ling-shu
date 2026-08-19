@@ -4106,7 +4106,7 @@ h2 {
   color: #172a20;
 }
 
-.embed-app-card p {
+.embed-app-id {
   margin: 4px 0 0;
   color: #66746d;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -4140,9 +4140,65 @@ h2 {
   font-weight: 700;
 }
 
-.embed-code-block pre {
-  max-height: 240px;
-  margin: 10px 0 0;
+.embed-integration-tabs {
+  margin-top: 10px;
+  min-width: 0;
+}
+
+.embed-integration-panel {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
+.embed-integration-head {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid #d9e7df;
+  border-radius: 8px;
+  background: #f6fbf8;
+}
+
+.embed-integration-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.embed-integration-copy strong {
+  color: #172a20;
+  font-size: 13px;
+}
+
+.embed-integration-copy span {
+  color: #65756e;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.embed-integration-notes {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: #52645b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.embed-code-stack {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
+.embed-code-panel {
+  max-height: 220px;
+  margin: 0;
   padding: 12px;
   overflow: auto;
   border-radius: 8px;
@@ -4261,6 +4317,10 @@ h2 {
 
   .embed-app-tags {
     justify-content: flex-start;
+  }
+
+  .embed-integration-head {
+    flex-direction: column;
   }
 
   .embed-chat-page .head-tools {

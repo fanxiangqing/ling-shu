@@ -1,6 +1,9 @@
 package service
 
-const AuditSourceEmbed = "embed"
+const (
+	AuditSourceEmbed       = "embed"
+	AuditSourceEmbedServer = "embed_server"
+)
 
 type AuditOrigin struct {
 	Source           string

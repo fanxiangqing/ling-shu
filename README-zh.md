@@ -265,6 +265,138 @@ await fetch("https://lingshu.example.com/api/v1/embed/token", {
 
 `external_user_id` 和 `external_user_name` 都来自第三方系统自己的用户体系，例如员工号、会员 ID、用户昵称或姓名。公开未登录页面也可以由第三方后端生成匿名访客 ID，并通过第三方 cookie/session 保持稳定。Ling-Shu 不要求第三方用户登录 Ling-Shu，也不会把后台管理 token 暴露给 SDK。
 
+### 服务端集成模式
+
+有些第三方系统不希望使用 Ling-Shu 的 iframe，而是希望自己的后端直接调用问数能力、自己的前端完全自定义页面。生产集成时仍然复用同一个 Embed App：`app_id` 可以视为公开应用标识，`app_secret` 必须只保存在第三方后端，不能下发到浏览器。
+
+服务端模式的调用方不需要传 `tenant_id`、`project_id`、`user_id` 或数据源 ID。Ling-Shu 会根据 `app_id` 找到内嵌应用所属项目，并在该项目已绑定且启用的数据源范围内自动完成路由、SQL 生成、审核和执行。如果希望把不同业务系统隔离到不同数据源范围，推荐在 Ling-Shu 中创建不同项目或不同 Embed App，而不是让第三方请求直接选择内部数据源。
+
+#### 一步式问数
+
+第三方后端拿到当前登录用户后，直接调用：
+
+```http
+POST https://lingshu.example.com/api/v1/embed/server/chat
+Content-Type: application/json
+X-Ling-Shu-App-Id: emb_xxx
+X-Ling-Shu-App-Secret: lsk_xxx
+X-Ling-Shu-External-User-Id: third-party-user-001
+X-Ling-Shu-External-User-Name: 三方系统用户
+```
+
+```json
+{
+  "key": "dashboard:123",
+  "content": "统计本月销售额和订单数",
+  "max_rows": 200,
+  "auto_execute": true
+}
+```
+
+字段含义：
+
+- `key`：业务上下文标识，例如 `dashboard:123`、`customer:456`、`order:789`。当 Embed App 的会话策略是 `context` 时，同一个 `external_user_id + key` 会复用同一个问数会话。
+- `content`：用户的自然语言问题。
+- `max_rows`：最多返回多少行，省略时使用服务端 SQL 审核器默认上限。
+- `auto_execute`：是否自动执行审核通过的 SQL；服务端模式默认是 `true`，需要只生成 SQL 时可传 `false`。
+
+也可以把 `app_id`、`app_secret`、`external_user_id`、`external_user_name` 放在 JSON body 中，便于服务端脚本或低代码系统调试；生产环境更推荐使用 Header，避免业务参数和密钥混在一起。
+
+一个完整的 Node.js 后端示例：
+
+```js
+async function askLingShu(currentUser, question, contextKey) {
+  const resp = await fetch("https://lingshu.example.com/api/v1/embed/server/chat", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Ling-Shu-App-Id": process.env.LINGSHU_EMBED_APP_ID,
+      "X-Ling-Shu-App-Secret": process.env.LINGSHU_EMBED_APP_SECRET,
+      "X-Ling-Shu-External-User-Id": currentUser.id,
+      "X-Ling-Shu-External-User-Name": currentUser.name
+    },
+    body: JSON.stringify({
+      key: contextKey,
+      content: question,
+      max_rows: 200
+    })
+  })
+  const body = await resp.json()
+  if (!resp.ok || body.code !== 0) throw new Error(body.message || "Ling-Shu 问数失败")
+  return body.data
+}
+```
+
+仓库也提供了一个只依赖 Go 标准库的服务端 SDK 风格示例：[examples/embed-server-go-sdk](examples/embed-server-go-sdk)。它包含普通问数和 SSE 流式问数两种调用方式，适合第三方后端直接改造成自己的 client。
+
+响应使用统一 envelope，`data` 中包含本次会话和问数结果。常用字段如下：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "session": {
+      "app_id": "emb_xxx",
+      "session_id": 123,
+      "session_key": "dashboard:123",
+      "external_user_id": "third-party-user-001",
+      "external_user_name": "三方系统用户"
+    },
+    "result": {
+      "agent": {
+        "answer": "本月销售额为 128000，订单数为 356。",
+        "sql": "SELECT ...",
+        "need_clarification": false,
+        "review": { "passed": true, "risk_level": "low" }
+      },
+      "execution": {
+        "columns": ["month", "sales_amount", "order_count"],
+        "rows": [{ "month": "2026-08", "sales_amount": 128000, "order_count": 356 }],
+        "chart": { "type": "bar" },
+        "answer": "本月销售额为 128000，订单数为 356。"
+      }
+    }
+  }
+}
+```
+
+第三方页面通常读取 `data.result.execution.answer` 作为回答文本，读取 `columns` 和 `rows` 渲染表格，读取 `chart` 决定是否画柱状图、折线图等。如果 `execution` 为空但 `agent.need_clarification=true`，表示模型需要用户补充条件，此时展示 `agent.answer` 或 `agent.explanation` 即可。
+
+#### 流式问数
+
+如果第三方前端需要展示推理进度，第三方后端可以调用 SSE 接口并把事件转发给自己的前端：
+
+```http
+POST /api/v1/embed/server/chat/stream
+Accept: text/event-stream
+```
+
+事件顺序：
+
+```text
+event: session       # 返回 session_id / session_key
+event: thought       # Agent 正在理解问题
+event: action        # Agent 选择工具或准备 SQL
+event: observation   # RAG 命中、SQL 审核、SQL 执行结果等观察
+event: result        # 最终结果，结构和 /embed/server/chat 的 data 基本一致
+```
+
+#### 显式管理会话
+
+一步式接口会自动创建或复用会话。第三方后端如果想把 `session_id` 存到自己的数据库里，也可以先创建会话，再按 `session_id` 继续追问：
+
+```text
+POST /api/v1/embed/server/sessions
+GET  /api/v1/embed/server/sessions/:session_id/messages
+POST /api/v1/embed/server/sessions/:session_id/messages
+POST /api/v1/embed/server/sessions/:session_id/messages/stream
+```
+
+访问已有 `session_id` 时仍需要携带同一个 `app_id/app_secret/external_user_id`。如果外部用户不匹配，Ling-Shu 会拒绝访问，避免一个三方用户读取另一个三方用户的会话。
+
+这些服务端接口不会校验浏览器来源，因为调用方是第三方后端；但仍会校验 `app_secret`、`external_user_id` 和会话归属。审计日志会标记为 `embed_server`，便于区分 SDK iframe 产生的 `embed` 请求。
+
 会话隔离由内嵌应用的会话策略决定：
 
 - **按用户复用（`user`）**：同一个 `app_id + external_user_id` 始终进入同一个默认会话，SDK 传入的 `key` 会被忽略。适合“我的数据助手”“个人经营助手”这类长期个人上下文。
@@ -388,7 +520,7 @@ sequenceDiagram
 - `/projects/*` 项目、项目成员授权、Provider 配置、知识库、RAG
 - `/datasources/*` 数据源测试、元数据同步、元数据预览
 - `/chat/*` 会话、消息、消息流式接口、实时语音接口
-- `/embed/*` 第三方内嵌 Token、Bootstrap、嵌入会话消息和实时语音接口
+- `/embed/*` 第三方内嵌 Token、Bootstrap、嵌入会话消息、服务端问数集成和实时语音接口
 - `/query/*` SQL 审核、执行和历史
 - `/providers/*` LLM / ASR / TTS Provider 工具接口
 - `/audit/*` 审计日志和查询执行记录

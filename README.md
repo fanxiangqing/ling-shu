@@ -265,6 +265,138 @@ await fetch("https://lingshu.example.com/api/v1/embed/token", {
 
 `external_user_id` and `external_user_name` come from the third-party system's own identity model, such as employee IDs, member IDs, nicknames, or display names. Public anonymous pages can generate a stable visitor ID on the third-party backend and keep it in that system's cookie/session. Third-party users do not need Ling-Shu accounts, and the SDK never receives Ling-Shu console tokens.
 
+### Server-side integration
+
+Some third-party systems do not want to use the Ling-Shu iframe. They want their backend to call ChatBI directly and their frontend to render a fully custom UI. Use the same Embed App for this production path: `app_id` is a public application identifier, while `app_secret` must stay on the third-party backend and must never be sent to browsers.
+
+Server-side callers do not need to send `tenant_id`, `project_id`, `user_id`, or datasource IDs. Ling-Shu resolves the project from `app_id` and runs routing, SQL generation, review, and execution within that project's active bound datasources. If different business systems need different datasource scopes, create separate Ling-Shu projects or Embed Apps instead of letting third-party requests select internal datasource IDs.
+
+#### One-step ChatBI call
+
+After the third-party backend resolves the current logged-in user, call:
+
+```http
+POST https://lingshu.example.com/api/v1/embed/server/chat
+Content-Type: application/json
+X-Ling-Shu-App-Id: emb_xxx
+X-Ling-Shu-App-Secret: lsk_xxx
+X-Ling-Shu-External-User-Id: third-party-user-001
+X-Ling-Shu-External-User-Name: Third-party user
+```
+
+```json
+{
+  "key": "dashboard:123",
+  "content": "Show this month's sales amount and order count",
+  "max_rows": 200,
+  "auto_execute": true
+}
+```
+
+Request fields:
+
+- `key`: business context key, such as `dashboard:123`, `customer:456`, or `order:789`. When the Embed App session policy is `context`, the same `external_user_id + key` reuses one ChatBI session.
+- `content`: the user's natural-language question.
+- `max_rows`: maximum rows to return. If omitted, the server-side SQL reviewer default is used.
+- `auto_execute`: whether to execute reviewed SQL automatically. Server-side mode defaults to `true`; set it to `false` if you only want SQL generation and review.
+
+`app_id`, `app_secret`, `external_user_id`, and `external_user_name` may also be sent in the JSON body for server scripts or low-code integrations. Headers are preferred in production so credentials stay separate from business payloads.
+
+A complete Node.js backend example:
+
+```js
+async function askLingShu(currentUser, question, contextKey) {
+  const resp = await fetch("https://lingshu.example.com/api/v1/embed/server/chat", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Ling-Shu-App-Id": process.env.LINGSHU_EMBED_APP_ID,
+      "X-Ling-Shu-App-Secret": process.env.LINGSHU_EMBED_APP_SECRET,
+      "X-Ling-Shu-External-User-Id": currentUser.id,
+      "X-Ling-Shu-External-User-Name": currentUser.name
+    },
+    body: JSON.stringify({
+      key: contextKey,
+      content: question,
+      max_rows: 200
+    })
+  })
+  const body = await resp.json()
+  if (!resp.ok || body.code !== 0) throw new Error(body.message || "Ling-Shu ChatBI failed")
+  return body.data
+}
+```
+
+The repository also includes a Go SDK-style server example that uses only the Go standard library: [examples/embed-server-go-sdk](examples/embed-server-go-sdk). It demonstrates both regular ChatBI calls and SSE streaming calls, and can be adapted into a third-party backend client.
+
+Responses use Ling-Shu's standard envelope. The most commonly used fields are:
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "session": {
+      "app_id": "emb_xxx",
+      "session_id": 123,
+      "session_key": "dashboard:123",
+      "external_user_id": "third-party-user-001",
+      "external_user_name": "Third-party user"
+    },
+    "result": {
+      "agent": {
+        "answer": "This month's sales amount is 128000 and order count is 356.",
+        "sql": "SELECT ...",
+        "need_clarification": false,
+        "review": { "passed": true, "risk_level": "low" }
+      },
+      "execution": {
+        "columns": ["month", "sales_amount", "order_count"],
+        "rows": [{ "month": "2026-08", "sales_amount": 128000, "order_count": 356 }],
+        "chart": { "type": "bar" },
+        "answer": "This month's sales amount is 128000 and order count is 356."
+      }
+    }
+  }
+}
+```
+
+Third-party pages usually render `data.result.execution.answer` as the answer, use `columns` and `rows` for a table, and use `chart` to decide whether to draw a bar chart, line chart, and so on. If `execution` is empty but `agent.need_clarification=true`, the model needs more user input; display `agent.answer` or `agent.explanation`.
+
+#### Streaming ChatBI
+
+For custom progress UIs, the third-party backend can call the SSE endpoint and forward events to its own frontend:
+
+```http
+POST /api/v1/embed/server/chat/stream
+Accept: text/event-stream
+```
+
+Event order:
+
+```text
+event: session       # session_id / session_key
+event: thought       # Agent is interpreting the question
+event: action        # Agent selected a tool or prepared SQL
+event: observation   # RAG hits, SQL review, SQL execution observations
+event: result        # final result, similar to /embed/server/chat data
+```
+
+#### Explicit session management
+
+The one-step endpoint automatically creates or reuses sessions. If the third-party backend wants to store `session_id` in its own database, it can create or reuse a session first and then continue the conversation by `session_id`:
+
+```text
+POST /api/v1/embed/server/sessions
+GET  /api/v1/embed/server/sessions/:session_id/messages
+POST /api/v1/embed/server/sessions/:session_id/messages
+POST /api/v1/embed/server/sessions/:session_id/messages/stream
+```
+
+Accessing an existing `session_id` still requires the same `app_id/app_secret/external_user_id`. If the external user does not match, Ling-Shu rejects the request so one third-party user cannot read another user's session.
+
+Server-side APIs do not validate browser origins because the caller is the third-party backend. They still validate `app_secret`, `external_user_id`, and session ownership. Audit logs are marked as `embed_server`, making them easy to distinguish from SDK iframe requests marked as `embed`.
+
 Session isolation is controlled by the embed app's session policy:
 
 - **Reuse by user (`user`)**: the same `app_id + external_user_id` always enters one default session. The SDK `key` is ignored. This fits long-lived personal assistants such as "my data assistant".
@@ -378,7 +510,7 @@ Common modules:
 - `/projects/*` projects, project member authorization, provider config, knowledge, RAG
 - `/datasources/*` data source test, metadata sync, metadata preview
 - `/chat/*` sessions, messages, streaming message API, realtime voice API
-- `/embed/*` third-party embed token, bootstrap, embedded chat messages, and realtime voice APIs
+- `/embed/*` third-party embed token, bootstrap, embedded chat messages, server-side ChatBI integration, and realtime voice APIs
 - `/query/*` SQL review, execution, and history
 - `/providers/*` LLM / ASR / TTS provider utilities
 - `/audit/*` audit logs and query execution records
