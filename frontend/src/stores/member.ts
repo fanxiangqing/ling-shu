@@ -17,6 +17,18 @@ export const projectRoleOptions = [
   { label: '只读成员', value: 'viewer' }
 ]
 
+function defaultMemberForm(projectUserId = 0) {
+  return {
+    username: 'analyst',
+    password: '123456',
+    display_name: '数据分析师',
+    email: '',
+    tenantRoleCode: '',
+    projectUserId,
+    projectRoleCode: 'analyst'
+  }
+}
+
 export const useMemberStore = defineStore('member', () => {
   const ws = useWorkspaceStore()
 
@@ -30,15 +42,7 @@ export const useMemberStore = defineStore('member', () => {
   const memberInviteModalVisible = ref(false)
   const projectMemberModalVisible = ref(false)
 
-  const memberForm = reactive({
-    username: 'analyst',
-    password: '123456',
-    display_name: '数据分析师',
-    email: '',
-    tenantRoleCode: '',
-    projectUserId: ws.context.userId,
-    projectRoleCode: 'analyst'
-  })
+  const memberForm = reactive(defaultMemberForm(ws.context.userId))
 
   const userOptionRecords = computed(() => userOptionItems.value.length ? userOptionItems.value : users.value.items)
   const tenantMemberOptionRecords = computed(() =>
@@ -56,6 +60,24 @@ export const useMemberStore = defineStore('member', () => {
       value: user.id
     }))
   })
+
+  function clearProjectMembers() {
+    projectMembers.value = emptyPage()
+    projectMemberModalVisible.value = false
+    memberForm.projectUserId = ws.context.userId
+    memberForm.projectRoleCode = 'analyst'
+  }
+
+  function resetState() {
+    users.value = emptyPage()
+    userOptionItems.value = []
+    tenantMemberOptionItems.value = []
+    tenantMemberOptionTenantId.value = 0
+    tenantMembers.value = emptyPage()
+    memberInviteModalVisible.value = false
+    clearProjectMembers()
+    Object.assign(memberForm, defaultMemberForm(ws.context.userId))
+  }
 
   async function refreshUsers(options: { silent?: boolean } = {}) {
     const result = await ws.run('刷新用户', () => authApi.listUsers(ws.pageParams('users')), options)
@@ -222,6 +244,8 @@ export const useMemberStore = defineStore('member', () => {
     projectMemberModalVisible,
     memberForm,
     userOptions,
+    resetState,
+    clearProjectMembers,
     refreshUsers,
     refreshUserOptions,
     refreshTenantMemberOptions,

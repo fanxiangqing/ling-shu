@@ -22,6 +22,39 @@ import type { ProjectProviderModes, ProviderConfigMode } from '@/stores/types'
 
 type ProviderConfigRecord = { id?: number; enabled?: boolean }
 
+function defaultProjectForm() {
+  return {
+    name: '电商经营项目',
+    description: '订单、商品、用户与渠道',
+    datasource_ids: [] as number[],
+    llm_mode: 'global' as ProviderConfigMode,
+    llm_model: 'qwen-plus',
+    llm_api_base: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    llm_api_key: '',
+    asr_mode: 'global' as ProviderConfigMode,
+    asr_model: 'nls-realtime-asr',
+    asr_access_key_id: '',
+    asr_access_key_secret: '',
+    asr_app_key: '',
+    tts_mode: 'global' as ProviderConfigMode,
+    tts_model: 'nls-tts',
+    tts_voice: 'aixia',
+    tts_access_key_id: '',
+    tts_access_key_secret: '',
+    tts_app_key: ''
+  }
+}
+
+function defaultEmbedForm() {
+  return {
+    name: '智能问数机器人',
+    allowed_origins: '',
+    session_policy: 'context',
+    launcher_title: '智能问数',
+    welcome_message: '你好，我可以帮你查询当前业务空间的数据。'
+  }
+}
+
 export const useProjectStore = defineStore('project', () => {
   const ws = useWorkspaceStore()
 
@@ -42,34 +75,9 @@ export const useProjectStore = defineStore('project', () => {
   const projectEmbedModalVisible = ref(false)
   const embedProjectId = ref(0)
 
-  const projectForm = reactive({
-    name: '电商经营项目',
-    description: '订单、商品、用户与渠道',
-    datasource_ids: [] as number[],
-    llm_mode: 'global' as ProviderConfigMode,
-    llm_model: 'qwen-plus',
-    llm_api_base: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    llm_api_key: '',
-    asr_mode: 'global' as ProviderConfigMode,
-    asr_model: 'nls-realtime-asr',
-    asr_access_key_id: '',
-    asr_access_key_secret: '',
-    asr_app_key: '',
-    tts_mode: 'global' as ProviderConfigMode,
-    tts_model: 'nls-tts',
-    tts_voice: 'aixia',
-    tts_access_key_id: '',
-    tts_access_key_secret: '',
-    tts_app_key: ''
-  })
+  const projectForm = reactive(defaultProjectForm())
 
-  const embedForm = reactive({
-    name: '智能问数机器人',
-    allowed_origins: '',
-    session_policy: 'context',
-    launcher_title: '智能问数',
-    welcome_message: '你好，我可以帮你查询当前业务空间的数据。'
-  })
+  const embedForm = reactive(defaultEmbedForm())
 
   const projectOptionRecords = computed(() => projectOptionItems.value.length ? projectOptionItems.value : projects.value.items)
   const projectDatasourceOptionRecords = computed(() =>
@@ -86,6 +94,30 @@ export const useProjectStore = defineStore('project', () => {
     if (!keyword) return projects.value.items
     return projects.value.items.filter((item) => `${item.name} ${item.code} ${item.description || ''}`.toLowerCase().includes(keyword))
   })
+
+  function clearProjectScopedState() {
+    projectDatasources.value = emptyPage()
+    projectDatasourceOptionItems.value = []
+    projectDatasourceOptionScope.value = ''
+    embedApps.value = emptyPage()
+    lastCreatedEmbed.value = null
+    revealedEmbedSecret.value = null
+    projectDatasourceModalVisible.value = false
+    projectEmbedModalVisible.value = false
+    embedProjectId.value = 0
+  }
+
+  function resetState() {
+    projects.value = emptyPage()
+    projectOptionItems.value = []
+    projectOptionTenantId.value = 0
+    projectProviderModes.value = {}
+    projectSearch.value = ''
+    projectModalVisible.value = false
+    clearProjectScopedState()
+    Object.assign(projectForm, defaultProjectForm())
+    Object.assign(embedForm, defaultEmbedForm())
+  }
 
   async function refreshProjects(options: { silent?: boolean } = {}) {
     if (!ws.context.tenantId) {
@@ -483,6 +515,8 @@ export const useProjectStore = defineStore('project', () => {
     selectedProject,
     projectSelectable,
     filteredProjects,
+    resetState,
+    clearProjectScopedState,
     refreshProjects,
     refreshProjectOptions,
     refreshProjectDatasources,

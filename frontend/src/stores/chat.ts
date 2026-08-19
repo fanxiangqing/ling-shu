@@ -61,6 +61,16 @@ export const useChatStore = defineStore('chat', () => {
     return project.projects.items.find((item) => item.id === session.project_id)?.name || `项目 #${session.project_id}`
   }
 
+  function resetState() {
+    sessions.value = emptyPage()
+    messages.value = []
+    latestResult.value = null
+    sessionLoadingMore.value = false
+    chatProjectModalVisible.value = false
+    maxRows.value = 200
+    chatForm.project_id = 0
+  }
+
   async function refreshSessions(options: { silent?: boolean } = {}) {
     if (!ws.context.tenantId) {
       sessions.value = emptyPage()
@@ -177,6 +187,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!ws.context.projectId) return notify.warning('会话缺少项目，请重新选择')
     if (!project.projectDatasources.items.length) return notify.warning('当前项目还没有绑定数据源')
 
+    const scopedRun = ws.beginScopedRun()
     const now = Date.now()
     const pendingId = `assistant-pending-${now}`
     messages.value.push({ id: `user-${now}`, role: 'user', content: question, createdAt: new Date().toISOString() })
@@ -198,9 +209,9 @@ export const useChatStore = defineStore('chat', () => {
       max_rows: maxRows.value
     }
     let result: SendChatMessageResult
-    ws.loading = true
     try {
       result = await chatApi.sendChatMessageStream(ws.context.sessionId, payload, (event) => {
+        if (!scopedRun.isCurrent()) return
         const pending = messages.value.find((item) => item.id === pendingId)
         if (!pending) return
         const steps = [...(pending.result?.agent.steps || []), event]
@@ -208,6 +219,7 @@ export const useChatStore = defineStore('chat', () => {
         pending.content = streamMessageContent(event, pending.content)
       })
     } catch (error) {
+      if (!scopedRun.isCurrent()) return
       const text = error instanceof Error ? error.message : '问数请求失败'
       const pending = messages.value.find((item) => item.id === pendingId)
       const steps = pending?.result?.agent.steps || []
@@ -227,8 +239,9 @@ export const useChatStore = defineStore('chat', () => {
       notify.error(text)
       return
     } finally {
-      ws.loading = false
+      scopedRun.finish()
     }
+    if (!scopedRun.isCurrent()) return
     latestResult.value = result as SendChatMessageResult
     const assistantMessage: ChatMessage = {
       id: `assistant-${Date.now()}`,
@@ -258,6 +271,7 @@ export const useChatStore = defineStore('chat', () => {
     selectedSession,
     chatDatasources,
     sessionProjectName,
+    resetState,
     refreshSessions,
     loadMoreSessions,
     handleSessionListScroll,

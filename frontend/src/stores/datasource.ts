@@ -26,6 +26,19 @@ export const dbTypeOptions = [
   { label: '达梦 DM8', value: 'dm8' }
 ]
 
+function defaultDatasourceForm() {
+  return {
+    name: 'local-mysql',
+    db_type: 'mysql',
+    host: '127.0.0.1',
+    port: 3306,
+    username: 'root',
+    password: 'root',
+    database: 'ling_shu',
+    config_json: ''
+  }
+}
+
 export const useDatasourceStore = defineStore('datasource', () => {
   const ws = useWorkspaceStore()
 
@@ -42,16 +55,7 @@ export const useDatasourceStore = defineStore('datasource', () => {
   const datasourceModalVisible = ref(false)
   const metadataPreviewVisible = ref(false)
 
-  const datasourceForm = reactive({
-    name: 'local-mysql',
-    db_type: 'mysql',
-    host: '127.0.0.1',
-    port: 3306,
-    username: 'root',
-    password: 'root',
-    database: 'ling_shu',
-    config_json: ''
-  })
+  const datasourceForm = reactive(defaultDatasourceForm())
 
   const datasourceOptionRecords = computed(() => datasourceOptionItems.value.length ? datasourceOptionItems.value : datasources.value.items)
   const datasourceOptions = computed(() => datasourceOptionRecords.value.map((item) => ({ label: `${item.name} (${item.db_type})`, value: item.id })))
@@ -325,6 +329,17 @@ export const useDatasourceStore = defineStore('datasource', () => {
     metadataPreviewVisible.value = false
   }
 
+  function resetState() {
+    datasources.value = emptyPage()
+    datasourceOptionItems.value = []
+    datasourceOptionTenantId.value = 0
+    datasourceSearch.value = ''
+    datasourceTypeFilter.value = null
+    datasourceModalVisible.value = false
+    resetMetadataPreview()
+    Object.assign(datasourceForm, defaultDatasourceForm())
+  }
+
   function handleMetadataModalVisibleChange(value: boolean) {
     if (value) {
       metadataPreviewVisible.value = true
@@ -334,6 +349,7 @@ export const useDatasourceStore = defineStore('datasource', () => {
   }
 
   function selectDatasource(datasource: DataSourceRecord) {
+    ws.invalidateWorkspaceScope()
     ws.context.datasourceId = datasource.id
     ws.resetPage('metadataTables')
     resetMetadataPreview()
@@ -399,6 +415,7 @@ export const useDatasourceStore = defineStore('datasource', () => {
     saveMetadataTableComment,
     saveMetadataColumnComment,
     resetMetadataPreview,
+    resetState,
     handleMetadataModalVisibleChange,
     selectDatasource,
     testSelectedDatasource,

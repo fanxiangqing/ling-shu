@@ -5,6 +5,7 @@ import AuthPanel from '@/components/AuthPanel.vue'
 import ManagementConsole from '@/components/ManagementConsole.vue'
 import EmbedChatApp from '@/components/embed/EmbedChatApp.vue'
 import { LOGIN_KEY, UNAUTHORIZED_EVENT, clearAuthState } from '@/api/client'
+import { useWorkspaceStore } from '@/stores/workspace'
 import type { LoginResult } from '@/types/domain'
 
 const themeOverrides: GlobalThemeOverrides = {
@@ -39,6 +40,7 @@ const themeOverrides: GlobalThemeOverrides = {
 
 const login = ref<LoginResult | null>(readLogin())
 const isEmbedMode = window.location.pathname.startsWith('/embed/')
+const workspace = useWorkspaceStore()
 
 function readLogin() {
   const raw = localStorage.getItem(LOGIN_KEY)
@@ -51,12 +53,14 @@ function readLogin() {
 }
 
 function onLogin(result: LoginResult) {
+  workspace.resetWorkspaceState(result.user.id)
   login.value = result
   localStorage.setItem(LOGIN_KEY, JSON.stringify(result))
 }
 
 function onLogout() {
   clearAuthState()
+  workspace.resetWorkspaceState()
   login.value = null
 }
 
@@ -79,7 +83,7 @@ onBeforeUnmount(() => {
       <NGlobalStyle />
       <EmbedChatApp v-if="isEmbedMode" />
       <AuthPanel v-else-if="!login" @login="onLogin" />
-      <ManagementConsole v-else :login="login" @logout="onLogout" />
+      <ManagementConsole v-else :key="login.user.id" :login="login" @logout="onLogout" />
     </NMessageProvider>
   </NConfigProvider>
 </template>

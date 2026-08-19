@@ -20,17 +20,8 @@ type RunOptions = {
   successMessage?: string | false
 }
 
-export const useWorkspaceStore = defineStore('workspace', () => {
-  const loading = ref(false)
-  const context = reactive({
-    tenantId: 0,
-    projectId: 0,
-    datasourceId: 0,
-    sessionId: 0,
-    userId: 0
-  })
-
-  const pageState = reactive<Record<PageKey, number>>({
+function initialPageState(): Record<PageKey, number> {
+  return {
     tenants: 1,
     projects: 1,
     datasources: 1,
@@ -45,7 +36,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     fewShots: 1,
     auditLogs: 1,
     auditQueries: 1
+  }
+}
+
+export const useWorkspaceStore = defineStore('workspace', () => {
+  const loading = ref(false)
+  const scopeVersion = ref(0)
+  const activeRuns = new Set<number>()
+  let nextRunId = 0
+
+  const context = reactive({
+    tenantId: 0,
+    projectId: 0,
+    datasourceId: 0,
+    sessionId: 0,
+    userId: 0
   })
+
+  const pageState = reactive<Record<PageKey, number>>(initialPageState())
 
   const tenants = ref<PageResult<TenantRecord>>(emptyPage())
   const tenantOptionItems = ref<TenantRecord[]>([])
@@ -57,6 +65,32 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   function setUserId(userId: number) {
     context.userId = userId
+  }
+
+  function syncLoading() {
+    loading.value = activeRuns.size > 0
+  }
+
+  function invalidateWorkspaceScope() {
+    scopeVersion.value += 1
+  }
+
+  function beginScopedRun() {
+    const scope = scopeVersion.value
+    const runId = ++nextRunId
+    activeRuns.add(runId)
+    syncLoading()
+    return {
+      isCurrent: () => scope === scopeVersion.value,
+      finish: () => {
+        activeRuns.delete(runId)
+        syncLoading()
+      }
+    }
+  }
+
+  function resetPages() {
+    Object.assign(pageState, initialPageState())
   }
 
   function pageParams(key: PageKey): PageParams {
@@ -78,17 +112,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   async function run(action: string, task: () => Promise<unknown>, options: RunOptions = {}) {
-    loading.value = true
+    const scopedRun = beginScopedRun()
     try {
       const result = await task()
+      if (!scopedRun.isCurrent()) return null
       if (!options.silent && options.successMessage !== false) notify.success(options.successMessage || `${action}成功`)
       return result
     } catch (error) {
+      if (!scopedRun.isCurrent()) return null
       const text = error instanceof Error ? error.message : `${action}失败`
       if (!options.silent) notify.error(text)
       return null
     } finally {
-      loading.value = false
+      scopedRun.finish()
     }
   }
 
@@ -104,6 +140,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (context.projectId > 0) return true
     notify.warning('请先创建或选择项目')
     return false
+  }
+
+  function resetWorkspaceState(userId = 0) {
+    invalidateWorkspaceScope()
+    activeRuns.clear()
+    syncLoading()
+    Object.assign(context, {
+      tenantId: 0,
+      projectId: 0,
+      datasourceId: 0,
+      sessionId: 0,
+      userId
+    })
+    resetPages()
+    tenants.value = emptyPage()
+    tenantOptionItems.value = []
+    useProjectStore().resetState()
+    useDatasourceStore().resetState()
+    useChatStore().resetState()
+    useMemberStore().resetState()
+    useKnowledgeStore().resetState()
+    useAuditStore().resetState()
   }
 
   async function refreshTenants(options: { silent?: boolean } = {}) {
@@ -133,16 +191,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const knowledge = useKnowledgeStore()
     const audit = useAuditStore()
 
+    invalidateWorkspaceScope()
+    resetPages()
     context.tenantId = Number(value || 0)
     context.projectId = 0
     context.datasourceId = 0
     context.sessionId = 0
-    chat.chatForm.project_id = 0
-    chat.messages = []
-    chat.latestResult = null
-    datasource.resetMetadataPreview()
-    knowledge.clear()
-    audit.clear()
+    project.resetState()
+    datasource.resetState()
+    chat.resetState()
+    member.resetState()
+    knowledge.resetState()
+    audit.resetState()
     await project.refreshProjects({ silent: true })
     await datasource.refreshTenantDatasources({ silent: true })
     await project.refreshProjectDatasources({ silent: true })
@@ -159,8 +219,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const knowledge = useKnowledgeStore()
     const audit = useAuditStore()
 
+    invalidateWorkspaceScope()
     context.projectId = Number(value || 0)
-    chat.chatForm.project_id = context.projectId
     context.datasourceId = 0
     context.sessionId = 0
     resetPage('projectDatasources')
@@ -171,10 +231,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     resetPage('fewShots')
     resetPage('auditLogs')
     resetPage('auditQueries')
-    chat.messages = []
-    chat.latestResult = null
+    project.clearProjectScopedState()
+    chat.resetState()
+    chat.chatForm.project_id = context.projectId
+    member.clearProjectMembers()
     datasource.resetMetadataPreview()
     knowledge.clearItems()
+    audit.clear()
     await project.refreshProjectDatasources({ silent: true })
     await member.refreshMembers({ silent: true })
     if (ui.activeModule === 'knowledge' && context.projectId) {
@@ -191,6 +254,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const knowledge = useKnowledgeStore()
     const audit = useAuditStore()
 
+    invalidateWorkspaceScope()
     context.datasourceId = Number(value || 0)
     resetPage('metadataTables')
     resetPage('metrics')
@@ -242,6 +306,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     resetPage,
     changePage,
     run,
+    beginScopedRun,
     ensureTenant,
     ensureProject,
     refreshTenants,
@@ -249,6 +314,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     handleTenantChange,
     handleProjectChange,
     handleDatasourceChange,
-    initializeWorkspace
+    initializeWorkspace,
+    invalidateWorkspaceScope,
+    resetWorkspaceState
   }
 })

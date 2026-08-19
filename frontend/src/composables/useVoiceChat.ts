@@ -59,6 +59,7 @@ export function useVoiceChat() {
   let voicePlaybackContext: AudioContext | null = null
   let voiceStreamPlayer: VoiceStreamPlayer | null = null
   let voiceRestartTimer: number | null = null
+  let voiceScopedRun: ReturnType<typeof ws.beginScopedRun> | null = null
 
   async function toggleVoiceInput() {
     if (voiceRecording.value) {
@@ -83,7 +84,7 @@ export function useVoiceChat() {
     unlockVoicePlayback()
     cleanupVoiceInput()
     voiceBusy.value = true
-    ws.loading = true
+    voiceScopedRun = ws.beginScopedRun()
     voiceTranscript = ''
     voiceTranscriptFinalized = false
     voiceSpeechChunks = []
@@ -92,15 +93,26 @@ export function useVoiceChat() {
     const now = Date.now()
     voiceUserMessageId = `voice-user-${now}`
     voiceAssistantPendingId = `voice-assistant-pending-${now}`
+    const scopedRun = voiceScopedRun
 
     let settled = false
     const settleError = (error: Error) => {
       if (settled) return
+      if (!scopedRun.isCurrent()) {
+        settled = true
+        abandonStaleVoiceSession()
+        return
+      }
       settled = true
       finishVoiceWithError(error)
     }
     const settleSuccess = (result: VoiceChatResult) => {
       if (settled) return
+      if (!scopedRun.isCurrent()) {
+        settled = true
+        abandonStaleVoiceSession()
+        return
+      }
       settled = true
       finishVoiceWithResult(result)
     }
@@ -116,8 +128,12 @@ export function useVoiceChat() {
         }
       })
     } catch (error) {
+      if (!scopedRun.isCurrent()) {
+        settled = true
+        abandonStaleVoiceSession()
+        return false
+      }
       voiceBusy.value = false
-      ws.loading = false
       voiceLoopActive.value = false
       settleError(error instanceof Error ? error : new Error('无法打开麦克风'))
       return false
@@ -132,6 +148,13 @@ export function useVoiceChat() {
       max_rows: chat.maxRows
     }, {
       onOpen: () => {
+        if (!scopedRun.isCurrent()) {
+          settled = true
+          mediaStream.getTracks().forEach((track) => track.stop())
+          voiceConnection?.abort()
+          abandonStaleVoiceSession()
+          return
+        }
         try {
           voiceRecording.value = true
           voiceCapture = createPcmAudioCapture(mediaStream, (chunk) => {
@@ -185,7 +208,26 @@ export function useVoiceChat() {
     voiceConnection = null
   }
 
+  function voiceScopeCurrent() {
+    return voiceScopedRun?.isCurrent() ?? true
+  }
+
+  function finishVoiceScopedRun() {
+    voiceScopedRun?.finish()
+    voiceScopedRun = null
+  }
+
+  function abandonStaleVoiceSession() {
+    clearVoiceRestartTimer()
+    voiceConnection?.abort()
+    cleanupVoiceInput()
+    voiceBusy.value = false
+    voiceLoopActive.value = false
+    finishVoiceScopedRun()
+  }
+
   function handleVoiceStreamEvent(event: VoiceChatStreamEvent) {
+    if (!voiceScopeCurrent()) return
     if (event.stage === 'asr') {
       const text = event.transcript?.text?.trim() || ''
       const terminal = isTerminalVoiceTranscriptEvent(event)
@@ -278,6 +320,10 @@ export function useVoiceChat() {
     try {
       await finishVoiceSpeechPlayback(result)
     } finally {
+      if (!voiceScopeCurrent()) {
+        finishVoiceSession()
+        return
+      }
       finishVoiceSession({ restart: voiceLoopActive.value })
     }
   }
@@ -315,7 +361,7 @@ export function useVoiceChat() {
   function finishVoiceSession(options: { restart?: boolean } = {}) {
     cleanupVoiceInput()
     voiceBusy.value = false
-    ws.loading = false
+    finishVoiceScopedRun()
     if (options.restart && voiceLoopActive.value) {
       scheduleVoiceRestart()
     }
@@ -708,6 +754,7 @@ export function useVoiceChat() {
   return {
     voiceRecording,
     voiceBusy,
-    toggleVoiceInput
+    toggleVoiceInput,
+    cancelVoiceInput
   }
 }

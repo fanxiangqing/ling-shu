@@ -1,14 +1,17 @@
 <script setup lang="ts">
+import { onBeforeUnmount } from 'vue'
 import { NButton, NForm, NFormItem, NIcon, NModal, NSelect, NTag } from 'naive-ui'
-import { Bot, Database, MessageSquarePlus } from '@lucide/vue'
+import { Bot, Database, FolderPlus, MessageSquarePlus } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useUiStore } from '@/stores/ui'
 import { useChatStore } from '@/stores/chat'
 import { useProjectStore } from '@/stores/project'
 import { useVoiceChat } from '@/composables/useVoiceChat'
 import ChatWorkbench from '@/components/ChatWorkbench.vue'
 
 const workspace = useWorkspaceStore()
+const ui = useUiStore()
 const chat = useChatStore()
 const projectStore = useProjectStore()
 const voice = useVoiceChat()
@@ -26,6 +29,10 @@ const {
 } = storeToRefs(chat)
 const { projects, projectOptions, projectSelectable, selectedProject } = storeToRefs(projectStore)
 const { voiceRecording, voiceBusy } = voice
+
+onBeforeUnmount(() => {
+  voice.cancelVoiceInput()
+})
 </script>
 
 <template>
@@ -72,18 +79,23 @@ const { voiceRecording, voiceBusy } = voice
           </template>
           新建对话
         </NButton>
-        <div v-if="!projects.total" class="empty-state compact">
-          <NIcon :component="Database" />
-          <h2>还没有项目</h2>
-          <p>已有项目会显示在这里；选择一个项目后就可以进入自然语言问数。</p>
-          <NSelect
-            :value="workspace.context.projectId || null"
-            :options="projectOptions"
-            :disabled="!projectSelectable"
-            filterable
-            placeholder="选择项目"
-            @update:value="workspace.handleProjectChange"
-          />
+        <div v-if="!projects.total" class="project-empty-guide">
+          <div class="project-empty-mark">
+            <NIcon :component="Database" />
+          </div>
+          <div class="project-empty-copy">
+            <span>项目未就绪</span>
+            <h3>先创建项目，再开始问数</h3>
+            <p>项目会承载数据源、业务知识和成员权限。</p>
+          </div>
+          <div class="project-empty-actions">
+            <NButton type="primary" secondary @click="ui.activeModule = 'project'">
+              <template #icon>
+                <NIcon :component="FolderPlus" />
+              </template>
+              去创建项目
+            </NButton>
+          </div>
         </div>
       </section>
 

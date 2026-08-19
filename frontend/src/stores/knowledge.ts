@@ -35,6 +35,26 @@ type RAGResultSection = {
   items: RAGResultItem[]
 }
 
+function defaultTermForm() {
+  return { term: 'GMV', definition: '成交金额，通常等于已支付订单金额总和。', aliases: '销售额,成交额' }
+}
+
+function defaultMetricForm() {
+  return { name: '销售额', description: '已支付订单金额', formula: 'sum(pay_amount)', default_time_column: 'created_at' }
+}
+
+function defaultFewShotForm() {
+  return {
+    question: '今天销售额是多少？',
+    sql: 'select sum(pay_amount) as sales_amount from orders where date(created_at) = current_date',
+    explanation: '按当天订单创建时间过滤并汇总支付金额。'
+  }
+}
+
+function defaultRAGForm() {
+  return { question: 'GMV 怎么计算？', limit: 8 }
+}
+
 export const useKnowledgeStore = defineStore('knowledge', () => {
   const ws = useWorkspaceStore()
 
@@ -47,14 +67,10 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
   const metricModalVisible = ref(false)
   const fewShotModalVisible = ref(false)
 
-  const termForm = reactive({ term: 'GMV', definition: '成交金额，通常等于已支付订单金额总和。', aliases: '销售额,成交额' })
-  const metricForm = reactive({ name: '销售额', description: '已支付订单金额', formula: 'sum(pay_amount)', default_time_column: 'created_at' })
-  const fewShotForm = reactive({
-    question: '今天销售额是多少？',
-    sql: 'select sum(pay_amount) as sales_amount from orders where date(created_at) = current_date',
-    explanation: '按当天订单创建时间过滤并汇总支付金额。'
-  })
-  const ragForm = reactive({ question: 'GMV 怎么计算？', limit: 8 })
+  const termForm = reactive(defaultTermForm())
+  const metricForm = reactive(defaultMetricForm())
+  const fewShotForm = reactive(defaultFewShotForm())
+  const ragForm = reactive(defaultRAGForm())
   const ragSearchResult = ref<RAGSearchResult | null>(null)
   const ragRebuildResult = ref<RAGRebuildResult | null>(null)
   const ragLastQuestion = ref('')
@@ -133,6 +149,18 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     ragSearchResult.value = null
     ragRebuildResult.value = null
     ragLastQuestion.value = ''
+  }
+
+  function resetState() {
+    clearItems()
+    knowledgeStatusFilter.value = 'all'
+    termModalVisible.value = false
+    metricModalVisible.value = false
+    fewShotModalVisible.value = false
+    Object.assign(termForm, defaultTermForm())
+    Object.assign(metricForm, defaultMetricForm())
+    Object.assign(fewShotForm, defaultFewShotForm())
+    Object.assign(ragForm, defaultRAGForm())
   }
 
   function normalizeRAGSearchResult(result: RAGSearchResult): RAGSearchResult {
@@ -361,6 +389,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     enabledKnowledgeTotal,
     clear: clearItems,
     clearItems,
+    resetState,
     refreshKnowledge,
     createTerm,
     createMetric,

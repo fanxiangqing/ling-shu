@@ -52,6 +52,17 @@ export const useAuditStore = defineStore('audit', () => {
     auditQueryExecutions.value = emptyPage()
   }
 
+  function resetState() {
+    clear()
+    auditTimeRange.value = null
+    Object.assign(auditFilters, {
+      user_id: null,
+      event_type: null,
+      resource_type: null,
+      query_status: null
+    })
+  }
+
   function auditTimeParams() {
     if (!auditTimeRange.value) return {}
     const [start, end] = auditTimeRange.value
@@ -124,6 +135,7 @@ export const useAuditStore = defineStore('audit', () => {
     auditTimeRange,
     auditFilters,
     clear,
+    resetState,
     refreshAudit,
     applyAuditFilters
   }
