@@ -43,8 +43,16 @@ type ResultSynthesizer interface {
 	SynthesizeResult(ctx context.Context, input ResultSynthesisInput) (string, error)
 }
 
+type ResultStreamSynthesizer interface {
+	SynthesizeResultStream(ctx context.Context, input ResultSynthesisInput, onDelta func(string) error) (string, error)
+}
+
 type MultiResultSynthesizer interface {
 	SynthesizeMultiResult(ctx context.Context, input MultiResultSynthesisInput) (string, error)
+}
+
+type MultiResultStreamSynthesizer interface {
+	SynthesizeMultiResultStream(ctx context.Context, input MultiResultSynthesisInput, onDelta func(string) error) (string, error)
 }
 
 type QueryExecutor interface {
@@ -556,16 +564,20 @@ func (s *ChatService) runAgentLoop(ctx context.Context, input SendChatMessageInp
 					synthesisTasks = []query.AgentSQLTask{pythonAnalysisSynthesisTask(input, result.SQLTasks)}
 					synthesisExecutions = []*QueryExecutionResult{analysisExecution}
 				}
-				s.attachMultiExecutionAnswer(ctx, input, content, agentContext, conversation, result, synthesisTasks, synthesisExecutions, analysisStatus, analysisDetail, &mergedSteps, emit)
 				execution = analysisExecution
 				if execution == nil {
-					execution = buildMultiDatasourceChartResult(input, content, result.SQLTasks, runResults, result.Answer)
-				} else if strings.TrimSpace(result.Answer) != "" {
-					execution.Answer = strings.TrimSpace(result.Answer)
-					execution.SpeechSummary = strings.TrimSpace(result.Answer)
+					execution = buildMultiDatasourceChartResult(input, content, result.SQLTasks, runResults, "")
 				}
 				if execution == nil && len(runResults) > 0 {
 					execution = runResults[0]
+				}
+				if err := emitExecutionResultEvent(emit, execution, runResults, nextAgentStep(mergedSteps)); err != nil {
+					return nil, nil, nil, loops, err
+				}
+				s.attachMultiExecutionAnswer(ctx, input, content, agentContext, conversation, result, synthesisTasks, synthesisExecutions, analysisStatus, analysisDetail, &mergedSteps, emit)
+				if execution != nil && strings.TrimSpace(result.Answer) != "" {
+					execution.Answer = strings.TrimSpace(result.Answer)
+					execution.SpeechSummary = strings.TrimSpace(result.Answer)
 				}
 				s.logger.Info("chat multi datasource execution finished",
 					append(chatLogFields(input, content, emit != nil),
@@ -685,6 +697,9 @@ func (s *ChatService) runAgentLoop(ctx context.Context, input SendChatMessageInp
 				)...,
 			)
 			analysisStatus, analysisDetail := s.analyzeSingleExecution(ctx, input, content, agentContext, result, runResult, analysisPromptStatus, analysisPromptDetail, &mergedSteps, emit)
+			if err := emitExecutionResultEvent(emit, runResult, nil, nextAgentStep(mergedSteps)); err != nil {
+				return nil, nil, nil, loops, err
+			}
 			s.attachSingleExecutionAnswer(ctx, input, content, agentContext, conversation, result, runResult, analysisStatus, analysisDetail, &mergedSteps, emit)
 			break
 		}
@@ -1030,7 +1045,7 @@ func (s *ChatService) synthesizeExecutionAnswer(ctx context.Context, input SendC
 			append(chatLogFields(input, question, emit != nil), zap.Error(err))...,
 		)
 	}
-	answer, err := s.callResultSynthesizer(ctx, ResultSynthesisInput{
+	synthesisInput := ResultSynthesisInput{
 		TenantID:              input.TenantID,
 		ProjectID:             input.ProjectID,
 		UserID:                input.UserID,
@@ -1044,7 +1059,8 @@ func (s *ChatService) synthesizeExecutionAnswer(ctx context.Context, input SendC
 		Executions:            executions,
 		ResultAnalysisStatus:  analysisStatus,
 		ResultAnalysisDetail:  analysisDetail,
-	})
+	}
+	answer, err := s.callResultSynthesizer(ctx, synthesisInput, answerDeltaEmitter(emit, len(*mergedSteps)))
 	if err != nil {
 		s.logger.Warn("chat result synthesis failed; using local summary",
 			append(chatLogFields(input, question, emit != nil),
@@ -1083,11 +1099,25 @@ func (s *ChatService) hasResultSynthesizer() bool {
 	if _, ok := s.agentRunner.(ResultSynthesizer); ok {
 		return true
 	}
-	_, ok := s.agentRunner.(MultiResultSynthesizer)
+	if _, ok := s.agentRunner.(ResultStreamSynthesizer); ok {
+		return true
+	}
+	if _, ok := s.agentRunner.(MultiResultSynthesizer); ok {
+		return true
+	}
+	_, ok := s.agentRunner.(MultiResultStreamSynthesizer)
 	return ok
 }
 
-func (s *ChatService) callResultSynthesizer(ctx context.Context, input ResultSynthesisInput) (string, error) {
+func (s *ChatService) callResultSynthesizer(ctx context.Context, input ResultSynthesisInput, onDelta func(string) error) (string, error) {
+	if onDelta != nil {
+		if synthesizer, ok := s.agentRunner.(ResultStreamSynthesizer); ok {
+			return synthesizer.SynthesizeResultStream(ctx, input, onDelta)
+		}
+		if synthesizer, ok := s.agentRunner.(MultiResultStreamSynthesizer); ok {
+			return synthesizer.SynthesizeMultiResultStream(ctx, input, onDelta)
+		}
+	}
 	if synthesizer, ok := s.agentRunner.(ResultSynthesizer); ok {
 		return synthesizer.SynthesizeResult(ctx, input)
 	}
@@ -1095,6 +1125,44 @@ func (s *ChatService) callResultSynthesizer(ctx context.Context, input ResultSyn
 		return synthesizer.SynthesizeMultiResult(ctx, input)
 	}
 	return "", ErrInvalidInput
+}
+
+func answerDeltaEmitter(emit func(query.AgentEvent) error, step int) func(string) error {
+	if emit == nil {
+		return nil
+	}
+	if step <= 0 {
+		step = 1
+	}
+	return func(delta string) error {
+		if delta == "" {
+			return nil
+		}
+		return emit(query.AgentEvent{
+			Type:       query.EventAnswerDelta,
+			Step:       step,
+			Name:       "result.synthesize.delta",
+			Content:    delta,
+			OccurredAt: time.Now(),
+		})
+	}
+}
+
+func emitExecutionResultEvent(emit func(query.AgentEvent) error, execution *QueryExecutionResult, executions []*QueryExecutionResult, step int) error {
+	if emit == nil || (execution == nil && len(executions) == 0) {
+		return nil
+	}
+	if step <= 0 {
+		step = 1
+	}
+	return emit(query.AgentEvent{
+		Type:       query.EventExecution,
+		Step:       step,
+		Name:       "sql.execution.result",
+		Execution:  execution,
+		Executions: executions,
+		OccurredAt: time.Now(),
+	})
 }
 
 func singleResultSynthesisTask(result *query.AgentResult, execution *QueryExecutionResult, datasources []query.AgentDatasource) query.AgentSQLTask {

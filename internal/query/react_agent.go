@@ -346,6 +346,17 @@ func (a *ReactAgent) Stream(ctx context.Context, req AgentRequest, emit func(Age
 }
 
 func (a *ReactAgent) SynthesizeResults(ctx context.Context, req AgentResultSynthesisRequest) (string, error) {
+	return a.synthesizeResults(ctx, req, nil)
+}
+
+func (a *ReactAgent) SynthesizeResultsStream(ctx context.Context, req AgentResultSynthesisRequest, onDelta func(string) error) (string, error) {
+	if onDelta == nil {
+		return a.SynthesizeResults(ctx, req)
+	}
+	return a.synthesizeResults(ctx, req, onDelta)
+}
+
+func (a *ReactAgent) synthesizeResults(ctx context.Context, req AgentResultSynthesisRequest, onDelta func(string) error) (string, error) {
 	if strings.TrimSpace(req.Question) == "" || req.ProjectID == 0 {
 		return "", ErrInvalidAgentInput
 	}
@@ -373,34 +384,52 @@ func (a *ReactAgent) SynthesizeResults(ctx context.Context, req AgentResultSynth
 		return "", err
 	}
 	started := time.Now()
-	resp, err := llmProvider.Chat(ctx, llm.ChatRequest{
+	chatReq := llm.ChatRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: req.Question},
 		},
 		Temperature: floatPtr(0.1),
 		MaxTokens:   800,
-	})
+	}
+
+	answer := ""
+	if onDelta == nil {
+		var resp *llm.ChatResponse
+		resp, err = llmProvider.Chat(ctx, chatReq)
+		if resp != nil {
+			answer = resp.Content
+		}
+	} else {
+		var raw strings.Builder
+		err = llmProvider.StreamChat(ctx, chatReq, func(event llm.ChatStreamEvent) error {
+			if event.Delta == "" {
+				return nil
+			}
+			raw.WriteString(event.Delta)
+			return onDelta(event.Delta)
+		})
+		answer = raw.String()
+	}
 	if err != nil {
 		a.logger.Error("llm result synthesis failed",
 			zap.Uint64("tenant_id", req.TenantID),
 			zap.Uint64("project_id", req.ProjectID),
 			zap.Int("sql_task_count", len(req.SQLTasks)),
 			zap.Int("execution_result_count", len(req.ExecutionResults)),
+			zap.Bool("streaming", onDelta != nil),
 			zap.Duration("duration", time.Since(started)),
 			zap.Error(err),
 		)
 		return "", err
 	}
-	answer := ""
-	if resp != nil {
-		answer = strings.TrimSpace(resp.Content)
-	}
+	answer = strings.TrimSpace(answer)
 	a.logger.Info("react agent synthesized execution results",
 		zap.Uint64("tenant_id", req.TenantID),
 		zap.Uint64("project_id", req.ProjectID),
 		zap.Int("sql_task_count", len(req.SQLTasks)),
 		zap.Int("execution_result_count", len(req.ExecutionResults)),
+		zap.Bool("streaming", onDelta != nil),
 		zap.Int("answer_chars", len([]rune(answer))),
 		zap.Duration("duration", time.Since(started)),
 	)

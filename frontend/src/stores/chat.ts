@@ -11,6 +11,8 @@ import type {
 } from '@/types/domain'
 import { DEFAULT_PAGE_SIZE, currentChatTitle, emptyPage } from '@/utils/format'
 import {
+  applyAnswerDelta,
+  applyExecutionResult,
   assistantResultText,
   failedChatResult,
   parseAgentResultMessage,
@@ -214,9 +216,13 @@ export const useChatStore = defineStore('chat', () => {
         if (!scopedRun.isCurrent()) return
         const pending = messages.value.find((item) => item.id === pendingId)
         if (!pending) return
+        if (applyExecutionResult(pending, event, question)) return
+        if (applyAnswerDelta(pending, event)) return
         const steps = [...(pending.result?.agent.steps || []), event]
-        pending.result = pendingChatResult(question, steps)
-        pending.content = streamMessageContent(event, pending.content)
+        pending.result = pendingChatResult(question, steps, pending.result)
+        if (!pending.answerStreaming || event.type === 'error') {
+          pending.content = streamMessageContent(event, pending.content)
+        }
       })
     } catch (error) {
       if (!scopedRun.isCurrent()) return
@@ -248,6 +254,7 @@ export const useChatStore = defineStore('chat', () => {
       role: 'assistant',
       content: assistantResultText(latestResult.value),
       createdAt: new Date().toISOString(),
+      answerStreaming: false,
       result: latestResult.value
     }
     const pendingIndex = messages.value.findIndex((item) => item.id === pendingId)

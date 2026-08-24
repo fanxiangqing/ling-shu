@@ -17,6 +17,8 @@ import type {
   VoiceChatStreamEvent
 } from '@/types/domain'
 import {
+  applyAnswerDelta,
+  applyExecutionResult,
   assistantResultText,
   failedChatResult,
   parseAgentResultMessage,
@@ -162,15 +164,20 @@ async function ask(question: string) {
     }, (event) => {
       const pending = messages.value.find((item) => item.id === pendingId)
       if (!pending) return
+      if (applyExecutionResult(pending, event, question)) return
+      if (applyAnswerDelta(pending, event)) return
       const steps = [...(pending.result?.agent.steps || []), event]
-      pending.result = pendingChatResult(question, steps)
-      pending.content = streamMessageContent(event, pending.content)
+      pending.result = pendingChatResult(question, steps, pending.result)
+      if (!pending.answerStreaming || event.type === 'error') {
+        pending.content = streamMessageContent(event, pending.content)
+      }
     })
     replacePendingMessage(pendingId, {
       id: `assistant-${Date.now()}`,
       role: 'assistant',
       content: assistantResultText(result),
       createdAt: new Date().toISOString(),
+      answerStreaming: false,
       result
     })
   } catch (error) {
@@ -317,9 +324,13 @@ function handleVoiceStreamEvent(event: VoiceChatStreamEvent) {
   }
   if (event.stage === 'chat' && event.agent) {
     const pending = ensureVoiceAssistantMessage()
+    if (applyExecutionResult(pending, event.agent, voiceTranscript || '语音问数')) return
+    if (applyAnswerDelta(pending, event.agent)) return
     const steps = [...(pending.result?.agent.steps || []), event.agent]
-    pending.result = pendingChatResult(voiceTranscript || '语音问数', steps)
-    pending.content = streamMessageContent(event.agent, pending.content)
+    pending.result = pendingChatResult(voiceTranscript || '语音问数', steps, pending.result)
+    if (!pending.answerStreaming || event.agent.type === 'error') {
+      pending.content = streamMessageContent(event.agent, pending.content)
+    }
   }
   if (event.stage === 'tts' && event.speech) {
     if (event.speech.content_type) voiceSpeechContentType = event.speech.content_type
@@ -339,6 +350,7 @@ function finishVoiceWithResult(result: VoiceChatResult) {
     role: 'assistant',
     content: result.chat ? assistantResultText(result.chat) : result.speech_text || '语音问数已完成。',
     createdAt: new Date().toISOString(),
+    answerStreaming: false,
     result: result.chat || undefined
   })
   void finishVoiceResultAndContinue(result)

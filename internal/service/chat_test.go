@@ -140,6 +140,86 @@ func TestChatServiceStreamMessageEmitsStepsAndStoresResult(t *testing.T) {
 	}
 }
 
+func TestChatServiceStreamMessageStreamsSynthesizedAnswerDeltas(t *testing.T) {
+	chatRepo := &chatFakeRepository{
+		session: &model.ChatSession{
+			BaseModel: model.BaseModel{ID: 10},
+			TenantID:  1,
+			ProjectID: 2,
+			UserID:    3,
+			Status:    "active",
+		},
+	}
+	agent := &chatFakeAgentRunner{
+		result: &query.AgentResult{
+			Question:     "当前项目有多少用户",
+			SQL:          "select count(*) as user_count from users LIMIT 200",
+			Explanation:  "统计用户数",
+			DatasourceID: 7,
+			Review:       query.ReviewResult{Passed: true, NormalizedSQL: "select count(*) as user_count from users LIMIT 200"},
+		},
+		synthesisAnswer: "当前项目用户数为 1。",
+		synthesisDeltas: []string{"当前项目", "用户数", "为 1。"},
+	}
+	rowCount := 1
+	executor := &chatFakeQueryExecutor{
+		result: &QueryExecutionResult{
+			Execution: &model.QueryExecution{ID: 99, Status: "success", DatasourceID: 7, RowCount: &rowCount},
+			Columns:   []string{"user_count"},
+			Rows:      []map[string]any{{"user_count": int64(1)}},
+		},
+	}
+	service := NewChatService(chatRepo, agent, executor)
+
+	var answer string
+	var eventOrder []string
+	var streamedExecution *QueryExecutionResult
+	result, err := service.StreamMessage(context.Background(), SendChatMessageInput{
+		TenantID:     1,
+		ProjectID:    2,
+		SessionID:    10,
+		UserID:       3,
+		Content:      "当前项目有多少用户",
+		DatasourceID: 7,
+		AutoExecute:  true,
+	}, func(event query.AgentEvent) error {
+		switch event.Type {
+		case query.EventExecution, query.EventAnswerDelta:
+			eventOrder = append(eventOrder, event.Type)
+		}
+		if event.Type == query.EventExecution {
+			if execution, ok := event.Execution.(*QueryExecutionResult); ok {
+				streamedExecution = execution
+			}
+		}
+		if event.Type == query.EventAnswerDelta {
+			answer += event.Content
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream message: %v", err)
+	}
+	if answer != agent.synthesisAnswer {
+		t.Fatalf("expected streamed synthesized answer %q, got %q", agent.synthesisAnswer, answer)
+	}
+	if streamedExecution == nil || streamedExecution.Execution == nil || streamedExecution.Execution.ID != 99 {
+		t.Fatalf("expected execution result event before answer, got %+v", streamedExecution)
+	}
+	if len(eventOrder) == 0 || eventOrder[0] != query.EventExecution {
+		t.Fatalf("expected execution result to stream before answer deltas, got %+v", eventOrder)
+	}
+	if agent.synthesisStreamCalls != 1 {
+		t.Fatalf("expected one streaming synthesis call, got %d", agent.synthesisStreamCalls)
+	}
+	if result.Agent.Answer != agent.synthesisAnswer || result.Execution.Answer != agent.synthesisAnswer {
+		t.Fatalf("expected final result to keep synthesized answer, got agent=%q execution=%q", result.Agent.Answer, result.Execution.Answer)
+	}
+	if hasAgentEvent(result.Agent.Steps, query.EventAnswerDelta, "result.synthesize.delta") {
+		t.Fatalf("answer delta events should not be stored in agent steps, got %+v", result.Agent.Steps)
+	}
+}
+
 func TestChatServiceSendMessageAutoExecutesReviewedSQL(t *testing.T) {
 	chatRepo := &chatFakeRepository{
 		session: &model.ChatSession{
@@ -1137,15 +1217,17 @@ func (r *chatFakeRepository) GetRecentMessages(ctx context.Context, sessionID ui
 }
 
 type chatFakeAgentRunner struct {
-	result          *query.AgentResult
-	results         []*query.AgentResult
-	lastInput       AskInput
-	inputs          []AskInput
-	calls           int
-	synthesisAnswer string
-	synthesisErr    error
-	synthesisInput  MultiResultSynthesisInput
-	synthesisCalls  int
+	result               *query.AgentResult
+	results              []*query.AgentResult
+	lastInput            AskInput
+	inputs               []AskInput
+	calls                int
+	synthesisAnswer      string
+	synthesisErr         error
+	synthesisDeltas      []string
+	synthesisInput       MultiResultSynthesisInput
+	synthesisCalls       int
+	synthesisStreamCalls int
 }
 
 func (r *chatFakeAgentRunner) Ask(ctx context.Context, input AskInput) (*query.AgentResult, error) {
@@ -1190,6 +1272,24 @@ func (r *chatFakeAgentRunner) SynthesizeMultiResult(ctx context.Context, input M
 	r.synthesisCalls++
 	if r.synthesisErr != nil {
 		return "", r.synthesisErr
+	}
+	return r.synthesisAnswer, nil
+}
+
+func (r *chatFakeAgentRunner) SynthesizeMultiResultStream(ctx context.Context, input MultiResultSynthesisInput, onDelta func(string) error) (string, error) {
+	r.synthesisInput = input
+	r.synthesisCalls++
+	r.synthesisStreamCalls++
+	if r.synthesisErr != nil {
+		return "", r.synthesisErr
+	}
+	if len(r.synthesisDeltas) == 0 {
+		return r.synthesisAnswer, nil
+	}
+	for _, delta := range r.synthesisDeltas {
+		if err := onDelta(delta); err != nil {
+			return "", err
+		}
 	}
 	return r.synthesisAnswer, nil
 }

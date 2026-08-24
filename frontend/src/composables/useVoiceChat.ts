@@ -6,6 +6,8 @@ import type {
   VoiceChatStreamEvent
 } from '@/types/domain'
 import {
+  applyAnswerDelta,
+  applyExecutionResult,
   assistantResultText,
   failedChatResult,
   pendingChatResult,
@@ -248,9 +250,13 @@ export function useVoiceChat() {
     if (event.stage === 'chat' && event.agent) {
       const pending = ensureVoiceAssistantMessage()
       const question = voiceTranscript || '语音问数'
+      if (applyExecutionResult(pending, event.agent, question)) return
+      if (applyAnswerDelta(pending, event.agent)) return
       const steps = [...(pending.result?.agent.steps || []), event.agent]
-      pending.result = pendingChatResult(question, steps)
-      pending.content = streamMessageContent(event.agent, pending.content)
+      pending.result = pendingChatResult(question, steps, pending.result)
+      if (!pending.answerStreaming || event.agent.type === 'error') {
+        pending.content = streamMessageContent(event.agent, pending.content)
+      }
     }
     if (event.stage === 'tts' && event.speech) {
       if (event.speech.content_type) voiceSpeechContentType = event.speech.content_type
@@ -310,6 +316,7 @@ export function useVoiceChat() {
       role: 'assistant',
       content: result.chat ? assistantResultText(result.chat) : result.speech_text || '语音问数已完成。',
       createdAt: new Date().toISOString(),
+      answerStreaming: false,
       result: result.chat || undefined
     }
     replaceVoicePendingMessage(assistantMessage)

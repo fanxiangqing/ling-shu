@@ -3166,6 +3166,43 @@ h2 {
   background: #fbfefd;
 }
 
+.message-answer {
+  margin-top: 14px;
+  border-top: 1px solid #dfe8e4;
+  padding: 13px 2px 0;
+}
+
+.message-answer .message-markdown {
+  position: relative;
+  margin-top: 0;
+  border-left: 3px solid #0f9a76;
+  padding: 2px 0 2px 12px;
+  color: #24332e;
+}
+
+.message-markdown.streaming::after {
+  display: inline-block;
+  width: 7px;
+  height: 1.08em;
+  margin-left: 4px;
+  border-radius: 2px;
+  background: #0f7f62;
+  content: "";
+  vertical-align: -0.16em;
+  animation: message-caret-blink 1s steps(2, start) infinite;
+}
+
+@keyframes message-caret-blink {
+  0%,
+  44% {
+    opacity: 1;
+  }
+  45%,
+  100% {
+    opacity: 0;
+  }
+}
+
 .agent-step-card {
   margin-top: 14px;
   border: 1px solid #dfe8e4;

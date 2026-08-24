@@ -84,6 +84,8 @@ type AgentEvent struct {
 	SQL        string        `json:"sql,omitempty"`
 	Review     *ReviewResult `json:"review,omitempty"`
 	Final      *AgentResult  `json:"final,omitempty"`
+	Execution  any           `json:"execution,omitempty"`
+	Executions any           `json:"executions,omitempty"`
 	OccurredAt time.Time     `json:"occurred_at"`
 }
 
@@ -171,6 +173,8 @@ const (
 	EventAction      = "action"
 	EventObservation = "observation"
 	EventLLMDelta    = "llm_delta"
+	EventExecution   = "execution_result"
+	EventAnswerDelta = "answer_delta"
 	EventFinal       = "final"
 	EventError       = "error"
 )

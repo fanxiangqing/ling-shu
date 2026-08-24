@@ -98,6 +98,7 @@ watch(
     message.id,
     message.content.length,
     message.pending ? 'pending' : 'done',
+    message.answerStreaming ? 'answer' : 'idle',
     message.result?.agent?.steps?.length || 0,
     message.result?.execution?.rows?.length || 0,
     message.result?.executions?.map((item) => item.rows?.length || 0).join(',')
@@ -118,6 +119,18 @@ function executionResults(message: ChatMessage) {
     return multi
   }
   return single ? [single] : []
+}
+
+function hasExecutionResults(message: ChatMessage) {
+  return executionResults(message).length > 0
+}
+
+function showAnswerBelow(message: ChatMessage) {
+  return message.role === 'assistant' && Boolean(message.content.trim()) && (message.answerStreaming || hasExecutionResults(message))
+}
+
+function showPrimaryMessageContent(message: ChatMessage) {
+  return !showAnswerBelow(message)
 }
 
 function sameExecution(left?: QueryExecutionResult, right?: QueryExecutionResult) {
@@ -189,6 +202,8 @@ function messageSteps(message: ChatMessage) {
   const deltaSteps = new Set<number>()
   for (const item of steps) {
     if (item.type === 'final') continue
+    if (item.type === 'execution_result') continue
+    if (item.type === 'answer_delta') continue
     if (item.type === 'llm_delta') {
       if (deltaSteps.has(item.step)) continue
       deltaSteps.add(item.step)
@@ -206,6 +221,7 @@ function activeStep(message: ChatMessage) {
 }
 
 function stepStatusText(message: ChatMessage) {
+  if (message.answerStreaming) return '输出中'
   if (message.pending) return '运行中'
   const steps = messageSteps(message)
   if (steps.some((step) => step.type === 'error')) return '失败'
@@ -213,7 +229,7 @@ function stepStatusText(message: ChatMessage) {
 }
 
 function stepStatusClass(message: ChatMessage) {
-  if (message.pending) return 'running'
+  if (message.pending || message.answerStreaming) return 'running'
   if (messageSteps(message).some((step) => step.type === 'error')) return 'warning'
   return 'done'
 }
@@ -309,9 +325,14 @@ function hasSQL(message: ChatMessage) {
           <div v-if="message.role === 'assistant'" class="message-label">
             <NIcon :component="Sparkles" />
             {{ assistantLabel }}
-            <NTag v-if="message.pending" size="small" round>运行中</NTag>
+            <NTag v-if="message.pending" size="small" round>{{ message.answerStreaming ? '输出中' : '运行中' }}</NTag>
           </div>
-          <div class="message-markdown" v-html="renderMessageContent(message.content)" />
+          <div
+            v-if="showPrimaryMessageContent(message)"
+            class="message-markdown"
+            :class="{ streaming: message.answerStreaming }"
+            v-html="renderMessageContent(message.content)"
+          />
 
           <section v-if="message.role === 'assistant' && messageSteps(message).length" class="agent-step-card">
             <header class="step-head">
@@ -349,7 +370,7 @@ function hasSQL(message: ChatMessage) {
             </details>
           </section>
 
-          <template v-if="message.role === 'assistant' && executionResults(message).length">
+          <template v-if="message.role === 'assistant' && hasExecutionResults(message)">
             <section
               v-for="(result, resultIndex) in executionResults(message)"
               :key="`${message.id}-result-${resultIndex}`"
@@ -381,7 +402,13 @@ function hasSQL(message: ChatMessage) {
                 {{ result.error }}
               </section>
             </section>
+          </template>
 
+          <section v-if="showAnswerBelow(message)" class="message-answer">
+            <div class="message-markdown" :class="{ streaming: message.answerStreaming }" v-html="renderMessageContent(message.content)" />
+          </section>
+
+          <template v-if="message.role === 'assistant' && hasExecutionResults(message)">
             <details v-if="hasSQL(message)" class="message-sql">
               <summary>查看 SQL</summary>
               <code v-if="message.result?.agent?.sql">{{ message.result.agent.sql }}</code>

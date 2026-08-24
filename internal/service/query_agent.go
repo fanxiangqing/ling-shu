@@ -154,6 +154,17 @@ func (s *QueryAgentService) StreamAsk(ctx context.Context, input AskInput, emit 
 }
 
 func (s *QueryAgentService) SynthesizeResult(ctx context.Context, input ResultSynthesisInput) (string, error) {
+	return s.synthesizeResult(ctx, input, nil)
+}
+
+func (s *QueryAgentService) SynthesizeResultStream(ctx context.Context, input ResultSynthesisInput, onDelta func(string) error) (string, error) {
+	if onDelta == nil {
+		return s.SynthesizeResult(ctx, input)
+	}
+	return s.synthesizeResult(ctx, input, onDelta)
+}
+
+func (s *QueryAgentService) synthesizeResult(ctx context.Context, input ResultSynthesisInput, onDelta func(string) error) (string, error) {
 	if s.agent == nil {
 		return "", query.ErrInvalidAgentInput
 	}
@@ -167,8 +178,9 @@ func (s *QueryAgentService) SynthesizeResult(ctx context.Context, input ResultSy
 		zap.Int("execution_count", len(input.Executions)),
 		zap.Int("question_chars", len([]rune(strings.TrimSpace(input.Question)))),
 		zap.String("question_hash", sqlHash(input.Question)),
+		zap.Bool("streaming", onDelta != nil),
 	)
-	answer, err := s.agent.SynthesizeResults(ctx, query.AgentResultSynthesisRequest{
+	req := query.AgentResultSynthesisRequest{
 		AgentRequest: query.AgentRequest{
 			TenantID:              input.TenantID,
 			ProjectID:             input.ProjectID,
@@ -184,13 +196,23 @@ func (s *QueryAgentService) SynthesizeResult(ctx context.Context, input ResultSy
 		ExecutionResults:     buildAgentExecutionSummaries(input.Tasks, input.Executions),
 		ResultAnalysisStatus: input.ResultAnalysisStatus,
 		ResultAnalysisDetail: input.ResultAnalysisDetail,
-	})
+	}
+	var (
+		answer string
+		err    error
+	)
+	if onDelta == nil {
+		answer, err = s.agent.SynthesizeResults(ctx, req)
+	} else {
+		answer, err = s.agent.SynthesizeResultsStream(ctx, req, onDelta)
+	}
 	if err != nil {
 		s.logger.Error("query agent result synthesis failed",
 			zap.Uint64("tenant_id", input.TenantID),
 			zap.Uint64("project_id", input.ProjectID),
 			zap.Int("sql_task_count", len(input.Tasks)),
 			zap.Int("execution_count", len(input.Executions)),
+			zap.Bool("streaming", onDelta != nil),
 			zap.Duration("duration", time.Since(started)),
 			zap.Error(err),
 		)
@@ -202,6 +224,7 @@ func (s *QueryAgentService) SynthesizeResult(ctx context.Context, input ResultSy
 		zap.Int("sql_task_count", len(input.Tasks)),
 		zap.Int("execution_count", len(input.Executions)),
 		zap.Int("answer_chars", len([]rune(answer))),
+		zap.Bool("streaming", onDelta != nil),
 		zap.Duration("duration", time.Since(started)),
 	)
 	return strings.TrimSpace(answer), nil
@@ -209,6 +232,10 @@ func (s *QueryAgentService) SynthesizeResult(ctx context.Context, input ResultSy
 
 func (s *QueryAgentService) SynthesizeMultiResult(ctx context.Context, input MultiResultSynthesisInput) (string, error) {
 	return s.SynthesizeResult(ctx, input)
+}
+
+func (s *QueryAgentService) SynthesizeMultiResultStream(ctx context.Context, input MultiResultSynthesisInput, onDelta func(string) error) (string, error) {
+	return s.SynthesizeResultStream(ctx, input, onDelta)
 }
 
 func (s *QueryAgentService) buildAgentInput(ctx context.Context, input AskInput) (AskInput, error) {

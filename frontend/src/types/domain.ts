@@ -26,6 +26,7 @@ export interface ChatMessage {
   content: string
   createdAt: string
   pending?: boolean
+  answerStreaming?: boolean
   result?: SendChatMessageResult
 }
 
@@ -70,6 +71,8 @@ export interface AgentEvent {
   content?: string
   sql?: string
   review?: ReviewResult
+  execution?: QueryExecutionResult
+  executions?: QueryExecutionResult[]
   occurred_at?: string
 }
 
