@@ -15,6 +15,7 @@ import (
 	"ling-shu/internal/handler"
 	"ling-shu/internal/llm"
 	"ling-shu/internal/middleware"
+	"ling-shu/internal/pyexecclient"
 	"ling-shu/internal/query"
 	"ling-shu/internal/rag"
 	"ling-shu/internal/repository"
@@ -32,6 +33,7 @@ type App struct {
 	cacheStore  cache.Store
 	db          *gorm.DB
 	vectorStore rag.VectorStore
+	execClient  *pyexecclient.Client
 }
 
 func BuildApplication(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*App, error) {
@@ -64,6 +66,7 @@ func BuildApplication(ctx context.Context, cfg *config.Config, logger *zap.Logge
 		cacheStore:  cacheStore,
 		db:          db,
 		vectorStore: services.vectorStore,
+		execClient:  services.execClient,
 	}, nil
 }
 
@@ -85,6 +88,11 @@ func (a *App) Close(logger *zap.Logger) {
 	}
 	if err := closeStore(a.cacheStore); err != nil {
 		logger.Warn("close redis cache store failed", zap.Error(err))
+	}
+	if a.execClient != nil {
+		if err := a.execClient.Close(); err != nil {
+			logger.Warn("close python exec client failed", zap.Error(err))
+		}
 	}
 	if a.db != nil {
 		if err := database.Close(a.db); err != nil {
@@ -166,6 +174,8 @@ type services struct {
 	knowledge      *service.KnowledgeService
 	embed          *service.EmbedService
 	vectorStore    rag.VectorStore
+	resultAnalysis *service.ResultAnalysisService
+	execClient     *pyexecclient.Client
 }
 
 func newServices(ctx context.Context, cfg *config.Config, logger *zap.Logger, db *gorm.DB, repos repositories, providers providers, cacheStore cache.Store) (services, error) {
@@ -182,11 +192,27 @@ func newServices(ctx context.Context, cfg *config.Config, logger *zap.Logger, db
 	if err != nil {
 		return services{}, err
 	}
+	execClient, err := newExecClient(ctx, cfg, logger)
+	if err != nil {
+		return services{}, err
+	}
 
 	tokenManager := authpkg.NewTokenManager(cfg.Auth.JWTSecret, cfg.Auth.AccessTokenTTL)
 	healthOptions := []service.HealthOption{}
 	if cacheStore != nil {
 		healthOptions = append(healthOptions, service.WithRedisPinger(cacheStore))
+	}
+	var resultAnalysisService *service.ResultAnalysisService
+	if cfg.Exec.Enabled && execClient != nil {
+		resultAnalysisService = service.NewResultAnalysisService(execClient, service.ResultAnalysisConfig{
+			Enabled:        cfg.Exec.Enabled,
+			Timeout:        cfg.Exec.Timeout,
+			MaxInputRows:   cfg.Exec.MaxInputRows,
+			MaxOutputRows:  cfg.Exec.MaxOutputRows,
+			MaxStdoutChars: cfg.Exec.MaxStdoutChars,
+			FailOpen:       cfg.Exec.FailOpen,
+		})
+		healthOptions = append(healthOptions, service.WithExecHealthChecker(resultAnalysisService, !cfg.Exec.FailOpen))
 	}
 	healthService := service.NewHealthService(db, healthOptions...)
 	authService := service.NewAuthService(repos.user, tokenManager, service.WithSignupWorkspace("tenant_admin"))
@@ -207,6 +233,9 @@ func newServices(ctx context.Context, cfg *config.Config, logger *zap.Logger, db
 
 	sqlReviewer := query.NewSQLReviewer(200, 1000)
 	auditService := service.NewAuditService(repos.audit)
+	if resultAnalysisService != nil {
+		resultAnalysisService.SetAuditRecorder(auditService)
+	}
 	datasourceService.SetAuditRecorder(auditService)
 	queryService := service.NewQueryService(repos.datasource, repos.query, datasourceRegistry, sqlReviewer, auditService)
 	queryService.SetDSNCodec(dsnCodec)
@@ -243,6 +272,11 @@ func newServices(ctx context.Context, cfg *config.Config, logger *zap.Logger, db
 	chatService := service.NewChatService(repos.chat, queryAgentService, queryService, ragRetriever)
 	chatService.SetAgentContextBuilder(agentContextBuilder)
 	chatService.SetAuditRecorder(auditService)
+	if resultAnalysisService != nil {
+		chatService.SetResultAnalyzer(resultAnalysisService)
+	} else if cfg.Exec.Enabled {
+		chatService.SetResultAnalysisUnavailable("Python exec 已启用但当前未建立 gRPC client；结果综合应只观察 SQL 原始执行结果。")
+	}
 	voiceService := service.NewVoiceService(providerService, chatService)
 	embedService := service.NewEmbedService(repos.embed, repos.datasource, providerService, cfg.Auth.JWTSecret, dsnCodec)
 
@@ -265,6 +299,8 @@ func newServices(ctx context.Context, cfg *config.Config, logger *zap.Logger, db
 		knowledge:      knowledgeService,
 		embed:          embedService,
 		vectorStore:    vectorStore,
+		resultAnalysis: resultAnalysisService,
+		execClient:     execClient,
 	}
 	out.attachLogger(logger)
 	return out, nil
@@ -286,6 +322,32 @@ func (s services) attachLogger(logger *zap.Logger) {
 	s.chat.SetLogger(logger)
 	s.voice.SetLogger(logger)
 	s.embed.SetLogger(logger)
+	if s.resultAnalysis != nil {
+		s.resultAnalysis.SetLogger(logger)
+	}
+}
+
+func newExecClient(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*pyexecclient.Client, error) {
+	if !cfg.Exec.Enabled {
+		return nil, nil
+	}
+	client, err := pyexecclient.Dial(ctx, cfg.Exec.GRPCAddr, cfg.Exec.Timeout)
+	if err != nil {
+		if cfg.Exec.FailOpen {
+			logger.Warn("python exec client init failed; result analysis disabled",
+				zap.String("grpc_addr", cfg.Exec.GRPCAddr),
+				zap.Error(err),
+			)
+			return nil, nil
+		}
+		return nil, fmt.Errorf("init python exec client: %w", err)
+	}
+	logger.Info("python exec client configured",
+		zap.String("grpc_addr", cfg.Exec.GRPCAddr),
+		zap.Duration("timeout", cfg.Exec.Timeout),
+		zap.Bool("fail_open", cfg.Exec.FailOpen),
+	)
+	return client, nil
 }
 
 func newVectorStore(ctx context.Context, cfg *config.Config) (rag.VectorStore, error) {

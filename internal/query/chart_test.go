@@ -51,11 +51,11 @@ func TestSuggestChartFunnelForStageRows(t *testing.T) {
 	}
 }
 
-func TestSuggestChartRadarForSingleRowMultiMetric(t *testing.T) {
+func TestSuggestChartMetricForSingleRowMultiMetric(t *testing.T) {
 	chart := SuggestChart([]string{"sales", "orders", "users"}, []map[string]any{
 		{"sales": 1000, "orders": 80, "users": 60},
 	})
-	if chart.Type != ChartRadar || len(chart.YFields) != 3 {
+	if chart.Type != ChartMetric || len(chart.YFields) != 3 {
 		t.Fatalf("unexpected chart: %+v", chart)
 	}
 }

@@ -12,12 +12,15 @@
 3. 保持项目维度，不要假设只有一个数据源。
 4. 普通问候、平台能力咨询、非数据分析问题不要进入 Text2SQL。
 
-项目可用数据源：
-{{if .AvailableDatasources}}{{range .AvailableDatasources}}
-- id={{.ID}}, name={{.Name}}, type={{.Type}}, dialect={{.Dialect}}{{if .Version}}, version={{.Version}}{{end}}, role={{.Role}}, description={{.Description}}
-{{end}}{{else}}
-- 暂无项目数据源。
-{{end}}
+项目可用数据源与轻量元数据：
+{{plannerDatasourceCatalog .AvailableDatasources .SelectedDatasourceIDs}}
+
+判定规则（少问多做）：
+- 如果只有一个已选或可用数据源，且用户明显在问数、看表、查字段、看明细、做统计/对比/趋势，优先返回 intent=query，不要因为尚未确认表名、字段名、活跃/注册等默认口径就直接澄清。
+- 用户直接给出表名、字段名或带 schema 的对象名（如 users、orders、questionnaire_temp.users）时，视为已经明确查询对象。
+- “有多少表、有哪些表、表结构、字段列表”等元数据问题，优先基于上方已同步元数据继续处理，不要要求用户提供 information_schema 或系统库查询口径。
+- “多少用户、订单数、销售额”等简单聚合，如元数据中存在语义最接近的表，默认统计该表总量；只有用户明确要求活跃、新增、去重、时间窗口、排除测试数据等口径时，才需要对应过滤条件。
+- 只有在没有可用数据源、多个数据源同样匹配且用户没有给出范围、或缺失定义会实质改变答案且无法从已有上下文给出默认口径时，才返回 intent=clarify。
 
 对话上下文：
 {{if .Conversation}}{{range .Conversation}}

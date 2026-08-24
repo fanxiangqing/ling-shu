@@ -48,17 +48,18 @@ type agentPlan struct {
 }
 
 type generatedSQL struct {
-	Intent                  string             `json:"intent"`
-	Thought                 string             `json:"thought"`
-	DatasourceID            uint64             `json:"datasource_id"`
-	DatasourceIDs           []uint64           `json:"datasource_ids"`
-	Dialect                 string             `json:"dialect"`
-	RequiresMultiDatasource bool               `json:"requires_multi_datasource"`
-	NeedClarification       bool               `json:"need_clarification"`
-	SQL                     string             `json:"sql"`
-	SQLTasks                []generatedSQLTask `json:"sql_tasks"`
-	Answer                  string             `json:"answer"`
-	Explanation             string             `json:"explanation"`
+	Intent                  string                  `json:"intent"`
+	Thought                 string                  `json:"thought"`
+	DatasourceID            uint64                  `json:"datasource_id"`
+	DatasourceIDs           []uint64                `json:"datasource_ids"`
+	Dialect                 string                  `json:"dialect"`
+	RequiresMultiDatasource bool                    `json:"requires_multi_datasource"`
+	NeedClarification       bool                    `json:"need_clarification"`
+	SQL                     string                  `json:"sql"`
+	SQLTasks                []generatedSQLTask      `json:"sql_tasks"`
+	Answer                  string                  `json:"answer"`
+	Explanation             string                  `json:"explanation"`
+	ResultAnalysis          AgentResultAnalysisPlan `json:"result_analysis"`
 }
 
 type generatedSQLTask struct {
@@ -181,6 +182,13 @@ func (a *ReactAgent) Stream(ctx context.Context, req AgentRequest, emit func(Age
 		final := chatAgentResult(req, promptContext, answer)
 		return a.emit(emit, EventFinal, step, "final", final.Explanation, "", &final.Review, final)
 	case AgentIntentClarify:
+		if shouldContinueAfterPlannerClarification(req.Question, promptContext, plan) {
+			if err := a.emit(emit, EventThought, step, "继续查询", "当前上下文已有可用数据源或匹配的表元数据，先进入 Text2SQL 尝试生成安全查询。", "", nil, nil); err != nil {
+				return err
+			}
+			step++
+			break
+		}
 		final := clarificationAgentResult(req, promptContext, firstNonEmpty(plan.Explanation, plan.Answer, "这个问题还需要补充目标数据源、指标口径或时间范围。"), plan)
 		return a.emit(emit, EventFinal, step, "final", final.Explanation, "", &final.Review, final)
 	}
@@ -274,6 +282,7 @@ func (a *ReactAgent) Stream(ctx context.Context, req AgentRequest, emit func(Age
 			RequiresMultiDatasource: true,
 			NeedClarification:       generated.NeedClarification,
 			Review:                  review,
+			ResultAnalysis:          generatedResultAnalysisPlan(generated, promptContext),
 		}
 		a.logger.Info("react agent finished with sql tasks",
 			zap.Uint64("tenant_id", req.TenantID),
@@ -320,6 +329,7 @@ func (a *ReactAgent) Stream(ctx context.Context, req AgentRequest, emit func(Age
 		RequiresMultiDatasource: generated.RequiresMultiDatasource,
 		NeedClarification:       generated.NeedClarification,
 		Review:                  review,
+		ResultAnalysis:          generatedResultAnalysisPlan(generated, promptContext),
 	}
 	if !review.Passed {
 		final.SQL = generated.SQL
@@ -356,6 +366,8 @@ func (a *ReactAgent) SynthesizeResults(ctx context.Context, req AgentResultSynth
 	promptContext := NewPromptContext(req.AgentRequest, dialectRules)
 	promptContext.SQLTasks = append([]AgentSQLTask(nil), req.SQLTasks...)
 	promptContext.ExecutionResults = append([]AgentExecutionSummary(nil), req.ExecutionResults...)
+	promptContext.ResultAnalysisStatus = strings.TrimSpace(req.ResultAnalysisStatus)
+	promptContext.ResultAnalysisDetail = strings.TrimSpace(req.ResultAnalysisDetail)
 	systemPrompt, err := a.prompts.ResultSynthesisSystem(promptContext)
 	if err != nil {
 		return "", err
@@ -451,7 +463,7 @@ func (a *ReactAgent) streamLLM(ctx context.Context, provider llm.Provider, req l
 	err := provider.StreamChat(ctx, req, func(event llm.ChatStreamEvent) error {
 		if event.Delta != "" {
 			raw.WriteString(event.Delta)
-			return a.emit(emit, EventLLMDelta, step, name, event.Delta, "", nil, nil)
+			return a.emit(emit, EventLLMDelta, step, name, llmDeltaProgress(name), "", nil, nil)
 		}
 		return nil
 	})
@@ -476,6 +488,13 @@ func (a *ReactAgent) streamLLM(ctx context.Context, provider llm.Provider, req l
 		zap.Int("response_chars", raw.Len()),
 	)
 	return raw.String(), nil
+}
+
+func llmDeltaProgress(name string) string {
+	if name == "llm.plan" {
+		return "模型正在判断任务类型。"
+	}
+	return "模型正在生成查询计划。"
 }
 
 func parseAgentPlan(content string) agentPlan {
@@ -513,6 +532,170 @@ func normalizeAgentIntent(intent string) string {
 	default:
 		return AgentIntentQuery
 	}
+}
+
+func generatedResultAnalysisPlan(generated generatedSQL, data PromptContext) AgentResultAnalysisPlan {
+	if strings.ToLower(strings.TrimSpace(data.ResultAnalysisStatus)) != "available" {
+		return AgentResultAnalysisPlan{}
+	}
+	return normalizeResultAnalysisPlan(generated.ResultAnalysis)
+}
+
+func normalizeResultAnalysisPlan(plan AgentResultAnalysisPlan) AgentResultAnalysisPlan {
+	mode := strings.ToLower(strings.TrimSpace(plan.Mode))
+	switch mode {
+	case "", "auto", "template", "code":
+	default:
+		mode = "auto"
+	}
+	return AgentResultAnalysisPlan{
+		Mode:           mode,
+		AnalysisGoal:   strings.TrimSpace(plan.AnalysisGoal),
+		TemplateName:   strings.TrimSpace(plan.TemplateName),
+		TemplateParams: copyAnalysisTemplateParams(plan.TemplateParams),
+	}
+}
+
+func copyAnalysisTemplateParams(params map[string]any) map[string]any {
+	if len(params) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(params))
+	for key, value := range params {
+		out[key] = value
+	}
+	return out
+}
+
+func shouldContinueAfterPlannerClarification(question string, data PromptContext, plan agentPlan) bool {
+	if !looksLikeDataQuestion(question) || len(data.AvailableDatasources) == 0 {
+		return false
+	}
+	if plan.RequiresMultiDatasource && len(plan.DatasourceIDs) > 1 {
+		return false
+	}
+	if len(data.SelectedDatasources) == 1 || len(data.AvailableDatasources) == 1 || len(plan.DatasourceIDs) == 1 || plan.DatasourceID > 0 {
+		return true
+	}
+	if matchedDatasourceNameCount(question, data.AvailableDatasources) == 1 {
+		return true
+	}
+	if matchedTableDatasourceCount(question, data.AvailableDatasources) == 1 {
+		return true
+	}
+	return looksLikeMetadataQuestion(question)
+}
+
+func looksLikeDataQuestion(question string) bool {
+	text := normalizedMatchText(question)
+	if text == "" || looksLikePlainConversation(text) {
+		return false
+	}
+	keywords := []string{
+		"多少", "几个", "几张", "有哪些", "列表", "明细", "查询", "查看", "统计", "总数", "数量", "计数",
+		"平均", "占比", "比例", "趋势", "排行", "排名", "分布", "对比", "比较", "字段", "表结构", "表",
+		"count", "sum", "avg", "total", "trend", "rank", "users", "orders", "select",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(text, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeMetadataQuestion(question string) bool {
+	text := normalizedMatchText(question)
+	keywords := []string{
+		"多少表", "几张表", "表数量", "表总数", "有哪些表", "所有表", "表列表", "表结构", "字段列表", "有哪些字段", "多少字段",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(text, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchedDatasourceNameCount(question string, datasources []AgentDatasource) int {
+	text := normalizedMatchText(question)
+	matched := map[uint64]bool{}
+	for _, datasource := range datasources {
+		if datasource.ID == 0 {
+			continue
+		}
+		for _, candidate := range []string{datasource.Name, datasource.Description} {
+			if containsNormalizedCandidate(text, candidate) {
+				matched[datasource.ID] = true
+				break
+			}
+		}
+	}
+	return len(matched)
+}
+
+func matchedTableDatasourceCount(question string, datasources []AgentDatasource) int {
+	text := normalizedMatchText(question)
+	matched := map[uint64]bool{}
+	for _, datasource := range datasources {
+		if datasource.ID == 0 {
+			continue
+		}
+		for _, table := range datasource.Tables {
+			candidates := []string{table.Name, table.Comment}
+			if strings.TrimSpace(table.Schema) != "" && strings.TrimSpace(table.Name) != "" {
+				candidates = append(candidates, strings.TrimSpace(table.Schema)+"."+strings.TrimSpace(table.Name))
+			}
+			if containsAnyNormalizedCandidate(text, candidates) {
+				matched[datasource.ID] = true
+				break
+			}
+		}
+	}
+	return len(matched)
+}
+
+func containsAnyNormalizedCandidate(text string, candidates []string) bool {
+	for _, candidate := range candidates {
+		if containsNormalizedCandidate(text, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsNormalizedCandidate(text string, candidate string) bool {
+	candidate = normalizedMatchText(candidate)
+	if len([]rune(candidate)) < 2 {
+		return false
+	}
+	if strings.Contains(text, candidate) {
+		return true
+	}
+	if len(candidate) > 3 && strings.HasSuffix(candidate, "s") {
+		return strings.Contains(text, strings.TrimSuffix(candidate, "s"))
+	}
+	return false
+}
+
+func normalizedMatchText(text string) string {
+	text = strings.ToLower(strings.TrimSpace(text))
+	replacer := strings.NewReplacer(
+		"`", "",
+		"\"", "",
+		"'", "",
+		"“", "",
+		"”", "",
+		"‘", "",
+		"’", "",
+		" ", "",
+		"\t", "",
+		"\n", "",
+		"\r", "",
+		"_", "",
+		"-", "",
+	)
+	return replacer.Replace(text)
 }
 
 func looksLikePlainConversation(question string) bool {

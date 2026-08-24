@@ -103,6 +103,21 @@ rag:
     top_k: 8
     timeout: 10s
 
+exec:
+  # 无状态 Python 结果集分析服务。关闭时不影响基础 Text2SQL 问数。
+  enabled: false
+  # 本地独立启动 exec/server.py 时使用 127.0.0.1:50051；容器内通常为 exec:50051。
+  grpc_addr: "127.0.0.1:50051"
+  timeout: 10s
+  # Go 侧传给 Python 的最大输入行数。SQL 仍先经过审核和 max_rows 限制。
+  max_input_rows: 5000
+  # Python 返回给前端和结果综合的最大输出行数。
+  max_output_rows: 1000
+  # stdout/stderr 预览截断长度。
+  max_stdout_chars: 10000
+  # true 表示 Python exec 不可用时降级为原始 SQL 结果，不阻断问数主链路。
+  fail_open: true
+
 providers:
   llm:
     # 目前项目默认接入阿里云百炼兼容 OpenAI API。

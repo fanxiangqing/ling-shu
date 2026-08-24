@@ -15,6 +15,7 @@ const (
 	ChartPie    = "pie"
 	ChartRadar  = "radar"
 	ChartFunnel = "funnel"
+	ChartMetric = "metric"
 )
 
 type ChartSuggestion struct {
@@ -34,6 +35,14 @@ func SuggestChart(columns []string, rows []map[string]any) ChartSuggestion {
 	numericFields := numericColumns(columns, rows)
 	timeField := firstTimeColumn(columns, rows)
 	categoryField := firstCategoryColumn(columns, numericFields, timeField)
+
+	if len(rows) == 1 && len(numericFields) > 0 {
+		return ChartSuggestion{
+			Type:    ChartMetric,
+			YFields: numericFields,
+			Reason:  "单行指标结果，适合用指标卡展示",
+		}
+	}
 
 	if timeField != "" && len(numericFields) > 0 {
 		return ChartSuggestion{
@@ -65,13 +74,6 @@ func SuggestChart(columns []string, rows []map[string]any) ChartSuggestion {
 			XField:  categoryField,
 			YFields: numericFields[:1],
 			Reason:  "包含分类字段和数值指标，适合比较大小",
-		}
-	}
-	if len(numericFields) >= 3 && len(rows) == 1 {
-		return ChartSuggestion{
-			Type:    ChartRadar,
-			YFields: numericFields,
-			Reason:  "单行多指标结果，适合雷达图比较多个指标",
 		}
 	}
 	return ChartSuggestion{Type: ChartTable, Reason: "未识别出稳定的分类或时间维度，默认展示表格"}

@@ -19,28 +19,40 @@ type AgentRequest struct {
 	FewShots              []AgentFewShot    `json:"few_shots,omitempty"`
 	Conversation          []AgentMessage    `json:"conversation,omitempty"`
 	Permission            AgentPermission   `json:"permission,omitempty"`
+	ResultAnalysisStatus  string            `json:"result_analysis_status,omitempty"`
+	ResultAnalysisDetail  string            `json:"result_analysis_detail,omitempty"`
 }
 
 type AgentResultSynthesisRequest struct {
 	AgentRequest
-	SQLTasks         []AgentSQLTask          `json:"sql_tasks,omitempty"`
-	ExecutionResults []AgentExecutionSummary `json:"execution_results,omitempty"`
+	SQLTasks             []AgentSQLTask          `json:"sql_tasks,omitempty"`
+	ExecutionResults     []AgentExecutionSummary `json:"execution_results,omitempty"`
+	ResultAnalysisStatus string                  `json:"result_analysis_status,omitempty"`
+	ResultAnalysisDetail string                  `json:"result_analysis_detail,omitempty"`
 }
 
 type AgentResult struct {
-	Question                string         `json:"question"`
-	Intent                  string         `json:"intent,omitempty"`
-	SQL                     string         `json:"sql"`
-	SQLTasks                []AgentSQLTask `json:"sql_tasks,omitempty"`
-	Answer                  string         `json:"answer,omitempty"`
-	Explanation             string         `json:"explanation"`
-	DatasourceID            uint64         `json:"datasource_id,omitempty"`
-	DatasourceIDs           []uint64       `json:"datasource_ids,omitempty"`
-	Dialect                 string         `json:"dialect,omitempty"`
-	RequiresMultiDatasource bool           `json:"requires_multi_datasource,omitempty"`
-	NeedClarification       bool           `json:"need_clarification,omitempty"`
-	Review                  ReviewResult   `json:"review"`
-	Steps                   []AgentEvent   `json:"steps"`
+	Question                string                  `json:"question"`
+	Intent                  string                  `json:"intent,omitempty"`
+	SQL                     string                  `json:"sql"`
+	SQLTasks                []AgentSQLTask          `json:"sql_tasks,omitempty"`
+	Answer                  string                  `json:"answer,omitempty"`
+	Explanation             string                  `json:"explanation"`
+	DatasourceID            uint64                  `json:"datasource_id,omitempty"`
+	DatasourceIDs           []uint64                `json:"datasource_ids,omitempty"`
+	Dialect                 string                  `json:"dialect,omitempty"`
+	RequiresMultiDatasource bool                    `json:"requires_multi_datasource,omitempty"`
+	NeedClarification       bool                    `json:"need_clarification,omitempty"`
+	Review                  ReviewResult            `json:"review"`
+	Steps                   []AgentEvent            `json:"steps"`
+	ResultAnalysis          AgentResultAnalysisPlan `json:"-"`
+}
+
+type AgentResultAnalysisPlan struct {
+	Mode           string         `json:"mode,omitempty"`
+	AnalysisGoal   string         `json:"analysis_goal,omitempty"`
+	TemplateName   string         `json:"template_name,omitempty"`
+	TemplateParams map[string]any `json:"template_params,omitempty"`
 }
 
 type AgentSQLTask struct {

@@ -24,6 +24,39 @@ func TestSQLReviewerAllowsSelectAndAddsLimit(t *testing.T) {
 	}
 }
 
+func TestSQLReviewerAllowsSemicolonInsideStringLiteral(t *testing.T) {
+	reviewer := NewSQLReviewer(200, 1000)
+	result := reviewer.Review("select group_concat(concat(month, ': ', ratio, '%') separator '; ') as ratios from progress limit 1;")
+	if !result.Passed {
+		t.Fatalf("expected semicolon in string literal to pass: %s", result.BlockedReason)
+	}
+	if result.NormalizedSQL != "select group_concat(concat(month, ': ', ratio, '%') separator '; ') as ratios from progress limit 1" {
+		t.Fatalf("unexpected normalized sql: %s", result.NormalizedSQL)
+	}
+}
+
+func TestSQLReviewerBlocksRealMultiStatement(t *testing.T) {
+	reviewer := NewSQLReviewer(200, 1000)
+	result := reviewer.Review("select * from orders; select * from users")
+	if result.Passed {
+		t.Fatal("expected multi statement SQL to be blocked")
+	}
+	if result.BlockedReason != "禁止多语句 SQL" {
+		t.Fatalf("unexpected blocked reason: %s", result.BlockedReason)
+	}
+}
+
+func TestSQLReviewerStripsCommentsBeforeLimit(t *testing.T) {
+	reviewer := NewSQLReviewer(200, 1000)
+	result := reviewer.Review("select id -- keep only active orders\nfrom orders /* dashboard query */ where status = 'paid'")
+	if !result.Passed {
+		t.Fatalf("expected SQL with comments to pass: %s", result.BlockedReason)
+	}
+	if result.NormalizedSQL != "select id from orders where status = 'paid' LIMIT 200" {
+		t.Fatalf("unexpected normalized sql: %s", result.NormalizedSQL)
+	}
+}
+
 func TestSQLReviewerAddsOracleFetchLimit(t *testing.T) {
 	reviewer := NewSQLReviewer(200, 1000)
 	result := reviewer.ReviewWithDialect("select * from orders", 50, "oracle")

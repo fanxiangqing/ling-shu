@@ -37,6 +37,13 @@ func TestLoadAppliesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("DASHSCOPE_API_KEY", "dashscope-key")
 	t.Setenv("LING_SHU_MILVUS_ENABLED", "true")
 	t.Setenv("LING_SHU_MILVUS_ADDR", "127.0.0.1:19530")
+	t.Setenv("LING_SHU_EXEC_ENABLED", "true")
+	t.Setenv("LING_SHU_EXEC_GRPC_ADDR", "exec:50051")
+	t.Setenv("LING_SHU_EXEC_TIMEOUT", "12s")
+	t.Setenv("LING_SHU_EXEC_MAX_INPUT_ROWS", "6000")
+	t.Setenv("LING_SHU_EXEC_MAX_OUTPUT_ROWS", "1500")
+	t.Setenv("LING_SHU_EXEC_MAX_STDOUT_CHARS", "12000")
+	t.Setenv("LING_SHU_EXEC_FAIL_OPEN", "false")
 	t.Setenv("ALIYUN_AK_ID", "ak-id")
 	t.Setenv("ALIYUN_AK_SECRET", "ak-secret")
 	t.Setenv("LING_SHU_ALIYUN_NLS_APP_KEY", "nls-app-key")
@@ -79,6 +86,9 @@ func TestLoadAppliesEnvironmentOverrides(t *testing.T) {
 	}
 	if !cfg.RAG.Milvus.Enabled || cfg.RAG.Milvus.Address != "127.0.0.1:19530" {
 		t.Fatalf("expected milvus config from env")
+	}
+	if !cfg.Exec.Enabled || cfg.Exec.GRPCAddr != "exec:50051" || cfg.Exec.Timeout.String() != "12s" || cfg.Exec.MaxInputRows != 6000 || cfg.Exec.MaxOutputRows != 1500 || cfg.Exec.MaxStdoutChars != 12000 || cfg.Exec.FailOpen {
+		t.Fatalf("expected exec config from env, got %+v", cfg.Exec)
 	}
 	if cfg.Providers.ASR.AccessKeyID != "ak-id" {
 		t.Fatalf("expected asr access key id from env")

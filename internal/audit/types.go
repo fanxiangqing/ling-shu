@@ -3,13 +3,15 @@ package audit
 import "context"
 
 const (
-	EventSQLReview    = "sql.review"
-	EventQueryExecute = "query.execute"
-	EventChatMessage  = "chat.message"
-	EventMetadataEdit = "metadata.comment.update"
+	EventSQLReview     = "sql.review"
+	EventQueryExecute  = "query.execute"
+	EventPythonAnalyze = "python.analyze"
+	EventChatMessage   = "chat.message"
+	EventMetadataEdit  = "metadata.comment.update"
 
 	ResourceSQLReview      = "sql_review"
 	ResourceQueryExecution = "query_execution"
+	ResourcePythonAnalysis = "python_analysis"
 	ResourceChatSession    = "chat_session"
 	ResourceMetadataTable  = "metadata_table"
 	ResourceMetadataColumn = "metadata_column"

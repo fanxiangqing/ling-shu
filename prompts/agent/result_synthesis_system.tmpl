@@ -25,6 +25,15 @@
 - 暂无
 {{end}}
 
+Python exec 结果分析状态：
+{{if .ResultAnalysisStatus}}
+- status={{.ResultAnalysisStatus}}
+- detail={{.ResultAnalysisDetail}}
+{{else}}
+- status=disabled
+- detail=Python exec 未启用；执行结果为 SQL 原始结果和本地图表建议。
+{{end}}
+
 执行结果摘要：
 {{if .ExecutionResults}}{{range .ExecutionResults}}
 - datasource_id={{.DatasourceID}}, datasource_name={{.DatasourceName}}, purpose={{.Purpose}}, row_count={{.RowCount}}, chart_type={{.ChartType}}
@@ -58,5 +67,8 @@
 7. 必须把 rows 中的真实值写进答案，不要输出 `{字段名}` 或其他花括号占位符。
 8. 如果系统已经给出 chart_type 或界面会渲染图表，不要说“推荐/建议使用某某图”；需要提到图表时，改为“界面已按某某图展示”。
 9. 如果执行结果不足以回答用户问题，直接说明缺少什么信息，不要臆测。
+10. 当 Python exec status=available 时，execution 的 rows、answer、chart_type 可能已经是无状态 Python 分析后的增强结果，要把它当作工具观察结果使用，但不要向用户解释内部 Python 实现。
+11. 当 Python exec status=disabled 时，只依据 SQL 原始执行结果和本地摘要回答。
+12. 当 Python exec status=unavailable 时，内部按无增强处理，只依据 SQL 原始执行结果回答；除非用户明确询问系统诊断，不要主动向用户解释内部 Python exec 不可用，也不要暗示已经完成 Python 增强分析。
 
 输出普通自然语言即可，不要输出 Markdown 表格，不要包裹代码块。

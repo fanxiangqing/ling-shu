@@ -888,6 +888,8 @@ func chartTypeName(chartType string) string {
 		return "漏斗图"
 	case querypkg.ChartRadar:
 		return "雷达图"
+	case querypkg.ChartMetric:
+		return "指标卡"
 	default:
 		return "表格"
 	}

@@ -10,12 +10,18 @@ import (
 )
 
 type HealthService struct {
-	db    *gorm.DB
-	redis RedisPinger
+	db       *gorm.DB
+	redis    RedisPinger
+	exec     ExecHealthChecker
+	execHard bool
 }
 
 type RedisPinger interface {
 	Ping(ctx context.Context) error
+}
+
+type ExecHealthChecker interface {
+	CheckHealth(ctx context.Context) error
 }
 
 type HealthOption func(*HealthService)
@@ -42,6 +48,13 @@ func NewHealthService(db *gorm.DB, options ...HealthOption) *HealthService {
 func WithRedisPinger(redis RedisPinger) HealthOption {
 	return func(s *HealthService) {
 		s.redis = redis
+	}
+}
+
+func WithExecHealthChecker(exec ExecHealthChecker, hard bool) HealthOption {
+	return func(s *HealthService) {
+		s.exec = exec
+		s.execHard = hard
 	}
 }
 
@@ -92,6 +105,20 @@ func (s *HealthService) Readiness(ctx context.Context) HealthStatus {
 			return status
 		}
 		status.Checks["redis"] = CheckStatus{Status: "ok"}
+	}
+	if s.exec != nil {
+		execCtx, execCancel := context.WithTimeout(ctx, 2*time.Second)
+		defer execCancel()
+		if err := s.exec.CheckHealth(execCtx); err != nil {
+			checkStatus := "degraded"
+			if s.execHard {
+				status.Status = "error"
+				checkStatus = "error"
+			}
+			status.Checks["exec"] = CheckStatus{Status: checkStatus, Message: err.Error()}
+			return status
+		}
+		status.Checks["exec"] = CheckStatus{Status: "ok"}
 	}
 	return status
 }

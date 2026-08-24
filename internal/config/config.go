@@ -20,6 +20,7 @@ type Config struct {
 	Database  DatabaseConfig `yaml:"database"`
 	Redis     RedisConfig    `yaml:"redis"`
 	RAG       RAGConfig      `yaml:"rag"`
+	Exec      ExecConfig     `yaml:"exec"`
 	Providers ProviderConfig `yaml:"providers"`
 }
 
@@ -111,6 +112,16 @@ type MilvusConfig struct {
 	Dimension  int           `yaml:"dimension"`
 	TopK       int           `yaml:"top_k"`
 	Timeout    time.Duration `yaml:"timeout"`
+}
+
+type ExecConfig struct {
+	Enabled        bool          `yaml:"enabled"`
+	GRPCAddr       string        `yaml:"grpc_addr"`
+	Timeout        time.Duration `yaml:"timeout"`
+	MaxInputRows   int           `yaml:"max_input_rows"`
+	MaxOutputRows  int           `yaml:"max_output_rows"`
+	MaxStdoutChars int           `yaml:"max_stdout_chars"`
+	FailOpen       bool          `yaml:"fail_open"`
 }
 
 type ProviderConfig struct {
@@ -243,6 +254,15 @@ func Default() Config {
 				TopK:       8,
 				Timeout:    10 * time.Second,
 			},
+		},
+		Exec: ExecConfig{
+			Enabled:        false,
+			GRPCAddr:       "127.0.0.1:50051",
+			Timeout:        10 * time.Second,
+			MaxInputRows:   5000,
+			MaxOutputRows:  1000,
+			MaxStdoutChars: 10000,
+			FailOpen:       true,
 		},
 		Providers: ProviderConfig{
 			LLM: LLMProviderConfig{
@@ -400,6 +420,23 @@ func (c Config) Validate() error {
 			return errors.New("rag.milvus.top_k must be positive")
 		}
 	}
+	if c.Exec.Enabled {
+		if c.Exec.GRPCAddr == "" {
+			return errors.New("exec.grpc_addr is required when exec.enabled is true")
+		}
+		if c.Exec.Timeout <= 0 {
+			return errors.New("exec.timeout must be positive when exec.enabled is true")
+		}
+		if c.Exec.MaxInputRows <= 0 {
+			return errors.New("exec.max_input_rows must be positive when exec.enabled is true")
+		}
+		if c.Exec.MaxOutputRows <= 0 {
+			return errors.New("exec.max_output_rows must be positive when exec.enabled is true")
+		}
+		if c.Exec.MaxStdoutChars <= 0 {
+			return errors.New("exec.max_stdout_chars must be positive when exec.enabled is true")
+		}
+	}
 	if c.Providers.LLM.Provider != "aliyun" {
 		return fmt.Errorf("providers.llm.provider only supports aliyun: %s", c.Providers.LLM.Provider)
 	}
@@ -471,6 +508,15 @@ func applyEnv(cfg *Config) {
 	setString(&cfg.RAG.Milvus.Collection, "LING_SHU_MILVUS_COLLECTION")
 	setInt(&cfg.RAG.Milvus.Dimension, "LING_SHU_MILVUS_DIMENSION")
 	setInt(&cfg.RAG.Milvus.TopK, "LING_SHU_RAG_TOP_K")
+	setDuration(&cfg.RAG.Milvus.Timeout, "LING_SHU_MILVUS_TIMEOUT")
+
+	setBool(&cfg.Exec.Enabled, "LING_SHU_EXEC_ENABLED")
+	setString(&cfg.Exec.GRPCAddr, "LING_SHU_EXEC_GRPC_ADDR")
+	setDuration(&cfg.Exec.Timeout, "LING_SHU_EXEC_TIMEOUT")
+	setInt(&cfg.Exec.MaxInputRows, "LING_SHU_EXEC_MAX_INPUT_ROWS")
+	setInt(&cfg.Exec.MaxOutputRows, "LING_SHU_EXEC_MAX_OUTPUT_ROWS")
+	setInt(&cfg.Exec.MaxStdoutChars, "LING_SHU_EXEC_MAX_STDOUT_CHARS")
+	setBool(&cfg.Exec.FailOpen, "LING_SHU_EXEC_FAIL_OPEN")
 
 	aliyunAPIKey := firstEnv("LING_SHU_ALIYUN_API_KEY", "DASHSCOPE_API_KEY")
 	if aliyunAPIKey != "" {

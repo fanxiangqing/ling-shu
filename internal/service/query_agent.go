@@ -33,6 +33,8 @@ type AskInput struct {
 	FewShots              []query.AgentFewShot
 	Conversation          []query.AgentMessage
 	Permission            query.AgentPermission
+	ResultAnalysisStatus  string
+	ResultAnalysisDetail  string
 }
 
 func NewQueryAgentService(agent *query.ReactAgent) *QueryAgentService {
@@ -78,6 +80,8 @@ func (s *QueryAgentService) Ask(ctx context.Context, input AskInput) (*query.Age
 		FewShots:              agentInput.FewShots,
 		Conversation:          agentInput.Conversation,
 		Permission:            agentInput.Permission,
+		ResultAnalysisStatus:  agentInput.ResultAnalysisStatus,
+		ResultAnalysisDetail:  agentInput.ResultAnalysisDetail,
 	})
 	if err != nil {
 		s.logger.Error("query agent ask failed",
@@ -129,6 +133,8 @@ func (s *QueryAgentService) StreamAsk(ctx context.Context, input AskInput, emit 
 		FewShots:              agentInput.FewShots,
 		Conversation:          agentInput.Conversation,
 		Permission:            agentInput.Permission,
+		ResultAnalysisStatus:  agentInput.ResultAnalysisStatus,
+		ResultAnalysisDetail:  agentInput.ResultAnalysisDetail,
 	}, emit)
 	if err != nil {
 		s.logger.Error("query agent stream failed",
@@ -174,8 +180,10 @@ func (s *QueryAgentService) SynthesizeResult(ctx context.Context, input ResultSy
 			Conversation:          input.Conversation,
 			Permission:            input.Permission,
 		},
-		SQLTasks:         append([]query.AgentSQLTask(nil), input.Tasks...),
-		ExecutionResults: buildAgentExecutionSummaries(input.Tasks, input.Executions),
+		SQLTasks:             append([]query.AgentSQLTask(nil), input.Tasks...),
+		ExecutionResults:     buildAgentExecutionSummaries(input.Tasks, input.Executions),
+		ResultAnalysisStatus: input.ResultAnalysisStatus,
+		ResultAnalysisDetail: input.ResultAnalysisDetail,
 	})
 	if err != nil {
 		s.logger.Error("query agent result synthesis failed",

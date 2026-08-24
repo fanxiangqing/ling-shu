@@ -43,6 +43,8 @@ type PromptContext struct {
 	Permission            AgentPermission
 	SQLTasks              []AgentSQLTask
 	ExecutionResults      []AgentExecutionSummary
+	ResultAnalysisStatus  string
+	ResultAnalysisDetail  string
 }
 
 type DialectRule struct {
@@ -78,7 +80,8 @@ func NewPromptRendererFromDir(promptDir string) (*PromptRenderer, error) {
 
 func NewPromptRendererFromTemplates(files map[string]string) (*PromptRenderer, error) {
 	root := template.New("prompts").Funcs(template.FuncMap{
-		"joinUint64": joinUint64,
+		"joinUint64":               joinUint64,
+		"plannerDatasourceCatalog": plannerDatasourceCatalog,
 	})
 	for name, content := range files {
 		if _, err := root.New(name).Parse(content); err != nil {
@@ -151,6 +154,21 @@ func NewPromptContext(req AgentRequest, dialectRules map[string]string) PromptCo
 	selectedIDs := normalizeSelectedDatasourceIDs(req, available)
 	selected := selectDatasources(available, selectedIDs)
 	defaultDialect := inferDefaultDialect(available, selected)
+	resultAnalysisStatus := strings.ToLower(strings.TrimSpace(req.ResultAnalysisStatus))
+	if resultAnalysisStatus == "" {
+		resultAnalysisStatus = "disabled"
+	}
+	resultAnalysisDetail := strings.TrimSpace(req.ResultAnalysisDetail)
+	if resultAnalysisDetail == "" {
+		switch resultAnalysisStatus {
+		case "available":
+			resultAnalysisDetail = "Python exec 已启用并可用于 SQL 执行后的无状态结果增强。"
+		case "unavailable":
+			resultAnalysisDetail = "Python exec 已启用但当前不可用；不要生成内部结果分析计划。"
+		default:
+			resultAnalysisDetail = "Python exec 未启用；不要生成内部结果分析计划。"
+		}
+	}
 
 	return PromptContext{
 		TenantID:              req.TenantID,
@@ -171,6 +189,8 @@ func NewPromptContext(req AgentRequest, dialectRules map[string]string) PromptCo
 		FewShots:              req.FewShots,
 		Conversation:          req.Conversation,
 		Permission:            req.Permission,
+		ResultAnalysisStatus:  resultAnalysisStatus,
+		ResultAnalysisDetail:  resultAnalysisDetail,
 	}
 }
 
@@ -348,4 +368,102 @@ func joinUint64(values []uint64, sep string) string {
 		parts = append(parts, fmt.Sprintf("%d", value))
 	}
 	return strings.Join(parts, sep)
+}
+
+const (
+	plannerCatalogDatasourceLimit    = 12
+	plannerCatalogTableLimit         = 24
+	plannerCatalogSelectedTableLimit = 40
+)
+
+func plannerDatasourceCatalog(datasources []AgentDatasource, selectedIDs []uint64) string {
+	if len(datasources) == 0 {
+		return "- 暂无项目数据源。"
+	}
+
+	selectedSet := map[uint64]bool{}
+	for _, id := range selectedIDs {
+		if id > 0 {
+			selectedSet[id] = true
+		}
+	}
+	ordered := prioritizePlannerDatasources(datasources, selectedSet)
+	limit := len(ordered)
+	if limit > plannerCatalogDatasourceLimit {
+		limit = plannerCatalogDatasourceLimit
+	}
+
+	var b strings.Builder
+	for i, ds := range ordered[:limit] {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		role := firstNonEmpty(ds.Role, "available")
+		if selectedSet[ds.ID] || ds.IsDefault {
+			role = "selected"
+		}
+		fmt.Fprintf(&b, "- id=%d, name=%s, type=%s, dialect=%s", ds.ID, ds.Name, ds.Type, ds.Dialect)
+		if ds.Version != "" {
+			fmt.Fprintf(&b, ", version=%s", ds.Version)
+		}
+		fmt.Fprintf(&b, ", role=%s, tables=%d", role, len(ds.Tables))
+		if ds.Description != "" {
+			fmt.Fprintf(&b, ", description=%s", ds.Description)
+		}
+		b.WriteByte('\n')
+		b.WriteString("  tables: ")
+		if len(ds.Tables) == 0 {
+			b.WriteString("暂无已同步表元数据")
+			continue
+		}
+		tableLimit := plannerCatalogTableLimit
+		if selectedSet[ds.ID] || ds.IsDefault || len(ordered) == 1 {
+			tableLimit = plannerCatalogSelectedTableLimit
+		}
+		if tableLimit > len(ds.Tables) {
+			tableLimit = len(ds.Tables)
+		}
+		for j, table := range ds.Tables[:tableLimit] {
+			if j > 0 {
+				b.WriteString("; ")
+			}
+			b.WriteString(formatPlannerTableLabel(table))
+		}
+		if omitted := len(ds.Tables) - tableLimit; omitted > 0 {
+			fmt.Fprintf(&b, "; ... 其余 %d 张表未展示", omitted)
+		}
+	}
+	if omitted := len(ordered) - limit; omitted > 0 {
+		fmt.Fprintf(&b, "\n- ... 其余 %d 个数据源未展示", omitted)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func prioritizePlannerDatasources(datasources []AgentDatasource, selectedSet map[uint64]bool) []AgentDatasource {
+	out := make([]AgentDatasource, 0, len(datasources))
+	appended := make([]bool, len(datasources))
+	for i, ds := range datasources {
+		if selectedSet[ds.ID] || ds.IsDefault || strings.EqualFold(strings.TrimSpace(ds.Role), "selected") {
+			out = append(out, ds)
+			appended[i] = true
+		}
+	}
+	for i, ds := range datasources {
+		if appended[i] {
+			continue
+		}
+		out = append(out, ds)
+	}
+	return out
+}
+
+func formatPlannerTableLabel(table AgentTable) string {
+	name := strings.TrimSpace(table.Name)
+	if strings.TrimSpace(table.Schema) != "" {
+		name = strings.TrimSpace(table.Schema) + "." + name
+	}
+	if strings.TrimSpace(table.Comment) == "" {
+		return name
+	}
+	return fmt.Sprintf("%s(%s)", name, strings.TrimSpace(table.Comment))
 }

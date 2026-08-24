@@ -139,6 +139,123 @@ func TestReactAgentBuildsSQLTasksForMultiDatasource(t *testing.T) {
 	}
 }
 
+func TestReactAgentContinuesAfterPrematurePlannerClarification(t *testing.T) {
+	index := 0
+	agent := NewReactAgent(fakeLLMProvider{
+		streamContents: []string{
+			`{"intent":"clarify","thought":"需要确认用户口径","need_clarification":true,"explanation":"需要确认用户指注册用户还是活跃用户"}`,
+			`{"intent":"query","thought":"使用 users 表按默认注册用户口径计数","datasource_id":2,"datasource_ids":[2],"dialect":"mysql","sql":"select count(*) as user_count from users","explanation":"默认统计 users 表总量"}`,
+		},
+		streamIndex: &index,
+	}, NewSQLReviewer(200, 1000), mustDefaultPromptRenderer(t), zap.NewNop())
+
+	result, err := agent.Run(context.Background(), AgentRequest{
+		TenantID:  1,
+		ProjectID: 1,
+		Question:  "现在有多少用户",
+		Datasources: []AgentDatasource{
+			{
+				ID:      2,
+				Name:    "问卷数据库",
+				Type:    "mysql",
+				Dialect: "mysql",
+				Tables: []AgentTable{
+					{Name: "users", Comment: "账号注册用户", PrimaryKeys: []string{"id"}},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.NeedClarification || result.Intent != AgentIntentQuery {
+		t.Fatalf("expected query without clarification, got intent=%s need=%v", result.Intent, result.NeedClarification)
+	}
+	if result.SQL != "select count(*) as user_count from users LIMIT 200" {
+		t.Fatalf("unexpected sql: %s", result.SQL)
+	}
+	foundContinue := false
+	for _, step := range result.Steps {
+		if step.Name == "继续查询" {
+			foundContinue = true
+			break
+		}
+	}
+	if !foundContinue {
+		t.Fatal("expected continuation step after premature planner clarification")
+	}
+}
+
+func TestReactAgentKeepsPlannerClarificationWithoutDatasources(t *testing.T) {
+	agent := NewReactAgent(fakeLLMProvider{
+		streamContent: `{"intent":"clarify","need_clarification":true,"explanation":"请先选择数据源"}`,
+	}, NewSQLReviewer(200, 1000), mustDefaultPromptRenderer(t), zap.NewNop())
+
+	result, err := agent.Run(context.Background(), AgentRequest{
+		TenantID:  1,
+		ProjectID: 1,
+		Question:  "现在有多少用户",
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Intent != AgentIntentClarify || !result.NeedClarification {
+		t.Fatalf("expected clarification, got intent=%s need=%v", result.Intent, result.NeedClarification)
+	}
+	if result.SQL != "" {
+		t.Fatalf("clarification should not generate sql, got %s", result.SQL)
+	}
+}
+
+func TestReactAgentParsesInternalResultAnalysisPlan(t *testing.T) {
+	agent := NewReactAgent(fakeLLMProvider{
+		streamContent: `{"thought":"查询后需要计算占比","datasource_id":10,"datasource_ids":[10],"dialect":"mysql","sql":"select province, amount from orders","result_analysis":{"mode":"code","analysis_goal":"result = df.groupby('province', as_index=False)['amount'].sum()"},"explanation":"统计省份销售额"}`,
+	}, NewSQLReviewer(200, 1000), mustDefaultPromptRenderer(t), zap.NewNop())
+
+	result, err := agent.Run(context.Background(), AgentRequest{
+		TenantID:             1,
+		ProjectID:            1,
+		DatasourceID:         10,
+		Question:             "按省份统计销售额占比",
+		ResultAnalysisStatus: "available",
+		ResultAnalysisDetail: "Python exec 可用。",
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.ResultAnalysis.Mode != "code" || !strings.Contains(result.ResultAnalysis.AnalysisGoal, "groupby") {
+		t.Fatalf("expected internal result analysis plan, got %+v", result.ResultAnalysis)
+	}
+	payload, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	if strings.Contains(string(payload), "result_analysis") || strings.Contains(string(payload), "groupby") {
+		t.Fatalf("internal result analysis plan should not be exposed in agent json: %s", payload)
+	}
+}
+
+func TestReactAgentIgnoresResultAnalysisPlanWhenExecUnavailable(t *testing.T) {
+	agent := NewReactAgent(fakeLLMProvider{
+		streamContent: `{"thought":"查询后需要计算占比","datasource_id":10,"datasource_ids":[10],"dialect":"mysql","sql":"select province, amount from orders","result_analysis":{"mode":"code","analysis_goal":"result = df.groupby('province', as_index=False)['amount'].sum()"},"explanation":"统计省份销售额"}`,
+	}, NewSQLReviewer(200, 1000), mustDefaultPromptRenderer(t), zap.NewNop())
+
+	result, err := agent.Run(context.Background(), AgentRequest{
+		TenantID:             1,
+		ProjectID:            1,
+		DatasourceID:         10,
+		Question:             "按省份统计销售额占比",
+		ResultAnalysisStatus: "unavailable",
+		ResultAnalysisDetail: "Python exec 未启动。",
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.ResultAnalysis.Mode != "" || result.ResultAnalysis.AnalysisGoal != "" {
+		t.Fatalf("expected unavailable exec to drop internal result analysis plan, got %+v", result.ResultAnalysis)
+	}
+}
+
 func TestReactAgentUsesResolvedProjectLLMProvider(t *testing.T) {
 	agent := NewReactAgent(fakeLLMProvider{
 		streamContent: `{"sql":"select 1","explanation":"wrong provider"}`,

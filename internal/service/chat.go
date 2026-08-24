@@ -24,6 +24,13 @@ const (
 	maxChatAgentLoops       = 3
 )
 
+const (
+	resultAnalysisStatusDisabled      = "disabled"
+	resultAnalysisStatusAvailable     = "available"
+	resultAnalysisStatusUnavailable   = "unavailable"
+	resultAnalysisPromptHealthTimeout = 2 * time.Second
+)
+
 type AgentRunner interface {
 	Ask(ctx context.Context, input AskInput) (*query.AgentResult, error)
 }
@@ -44,18 +51,29 @@ type QueryExecutor interface {
 	ExecuteSQL(ctx context.Context, input ExecuteSQLInput) (*QueryExecutionResult, error)
 }
 
+type ResultAnalyzer interface {
+	AnalyzeQueryResults(ctx context.Context, input AnalyzeQueryResultsInput) (*ResultAnalysisResult, error)
+}
+
+type ResultAnalysisHealthChecker interface {
+	CheckHealth(ctx context.Context) error
+}
+
 type RAGRetriever interface {
 	Retrieve(ctx context.Context, input rag.Request) (*rag.Context, error)
 }
 
 type ChatService struct {
-	chatRepo            repository.ChatRepository
-	agentRunner         AgentRunner
-	queryExecutor       QueryExecutor
-	ragRetriever        RAGRetriever
-	agentContextBuilder AgentContextBuilder
-	auditRecorder       auditpkg.Recorder
-	logger              *zap.Logger
+	chatRepo             repository.ChatRepository
+	agentRunner          AgentRunner
+	queryExecutor        QueryExecutor
+	resultAnalyzer       ResultAnalyzer
+	resultAnalysisStatus string
+	resultAnalysisDetail string
+	ragRetriever         RAGRetriever
+	agentContextBuilder  AgentContextBuilder
+	auditRecorder        auditpkg.Recorder
+	logger               *zap.Logger
 }
 
 type CreateChatSessionInput struct {
@@ -115,6 +133,8 @@ type ResultSynthesisInput struct {
 	Conversation          []query.AgentMessage
 	Tasks                 []query.AgentSQLTask
 	Executions            []*QueryExecutionResult
+	ResultAnalysisStatus  string
+	ResultAnalysisDetail  string
 }
 
 type MultiResultSynthesisInput = ResultSynthesisInput
@@ -135,16 +155,35 @@ func NewChatService(chatRepo repository.ChatRepository, agentRunner AgentRunner,
 		ragRetriever = ragRetrievers[0]
 	}
 	return &ChatService{
-		chatRepo:      chatRepo,
-		agentRunner:   agentRunner,
-		queryExecutor: queryExecutor,
-		ragRetriever:  ragRetriever,
-		logger:        zap.NewNop(),
+		chatRepo:             chatRepo,
+		agentRunner:          agentRunner,
+		queryExecutor:        queryExecutor,
+		resultAnalysisStatus: resultAnalysisStatusDisabled,
+		resultAnalysisDetail: "Python exec 未启用；结果综合只观察 SQL 原始执行结果。",
+		ragRetriever:         ragRetriever,
+		logger:               zap.NewNop(),
 	}
 }
 
 func (s *ChatService) SetAuditRecorder(recorder auditpkg.Recorder) {
 	s.auditRecorder = recorder
+}
+
+func (s *ChatService) SetResultAnalyzer(analyzer ResultAnalyzer) {
+	s.resultAnalyzer = analyzer
+	if analyzer == nil {
+		s.resultAnalysisStatus = resultAnalysisStatusDisabled
+		s.resultAnalysisDetail = "Python exec 未启用；结果综合只观察 SQL 原始执行结果。"
+		return
+	}
+	s.resultAnalysisStatus = resultAnalysisStatusAvailable
+	s.resultAnalysisDetail = "Python exec 已启用；可对 SQL 结果做无状态增强分析。"
+}
+
+func (s *ChatService) SetResultAnalysisUnavailable(detail string) {
+	s.resultAnalyzer = nil
+	s.resultAnalysisStatus = resultAnalysisStatusUnavailable
+	s.resultAnalysisDetail = firstNonEmptyService(strings.TrimSpace(detail), "Python exec 已启用但当前不可用；结果综合应只观察 SQL 原始执行结果。")
 }
 
 func (s *ChatService) SetLogger(logger *zap.Logger) {
@@ -417,6 +456,7 @@ func (s *ChatService) runAgentLoop(ctx context.Context, input SendChatMessageInp
 		if err := emitAgentEvent(emit, mergedSteps[len(mergedSteps)-1]); err != nil {
 			return nil, nil, nil, loops, err
 		}
+		analysisPromptStatus, analysisPromptDetail := s.currentResultAnalysisPromptState(ctx)
 
 		result, steps, err := s.askAgent(ctx, AskInput{
 			TenantID:              input.TenantID,
@@ -435,6 +475,8 @@ func (s *ChatService) runAgentLoop(ctx context.Context, input SendChatMessageInp
 			FewShots:              fewShots,
 			Conversation:          conversation,
 			Permission:            agentContext.Permission,
+			ResultAnalysisStatus:  analysisPromptStatus,
+			ResultAnalysisDetail:  analysisPromptDetail,
 		}, emit)
 		if err != nil {
 			s.logger.Error("chat agent ask failed",
@@ -507,8 +549,21 @@ func (s *ChatService) runAgentLoop(ctx context.Context, input SendChatMessageInp
 			runResults, err := s.executeSQLTasks(ctx, input, content, result.SQLTasks, &mergedSteps, emit)
 			executions = runResults
 			if err == nil {
-				s.attachMultiExecutionAnswer(ctx, input, content, agentContext, conversation, result, runResults, &mergedSteps, emit)
-				execution = buildMultiDatasourceChartResult(input, content, result.SQLTasks, runResults, result.Answer)
+				analysisExecution, analysisStatus, analysisDetail := s.analyzeMultipleExecutions(ctx, input, content, result.SQLTasks, runResults, result.ResultAnalysis, analysisPromptStatus, analysisPromptDetail, &mergedSteps, emit)
+				synthesisTasks := result.SQLTasks
+				synthesisExecutions := runResults
+				if analysisExecution != nil {
+					synthesisTasks = []query.AgentSQLTask{pythonAnalysisSynthesisTask(input, result.SQLTasks)}
+					synthesisExecutions = []*QueryExecutionResult{analysisExecution}
+				}
+				s.attachMultiExecutionAnswer(ctx, input, content, agentContext, conversation, result, synthesisTasks, synthesisExecutions, analysisStatus, analysisDetail, &mergedSteps, emit)
+				execution = analysisExecution
+				if execution == nil {
+					execution = buildMultiDatasourceChartResult(input, content, result.SQLTasks, runResults, result.Answer)
+				} else if strings.TrimSpace(result.Answer) != "" {
+					execution.Answer = strings.TrimSpace(result.Answer)
+					execution.SpeechSummary = strings.TrimSpace(result.Answer)
+				}
 				if execution == nil && len(runResults) > 0 {
 					execution = runResults[0]
 				}
@@ -629,7 +684,8 @@ func (s *ChatService) runAgentLoop(ctx context.Context, input SendChatMessageInp
 					zap.Duration("duration", time.Since(attemptStarted)),
 				)...,
 			)
-			s.attachSingleExecutionAnswer(ctx, input, content, agentContext, conversation, result, runResult, &mergedSteps, emit)
+			analysisStatus, analysisDetail := s.analyzeSingleExecution(ctx, input, content, agentContext, result, runResult, analysisPromptStatus, analysisPromptDetail, &mergedSteps, emit)
+			s.attachSingleExecutionAnswer(ctx, input, content, agentContext, conversation, result, runResult, analysisStatus, analysisDetail, &mergedSteps, emit)
 			break
 		}
 
@@ -790,13 +846,144 @@ func (s *ChatService) executeSQLTasks(ctx context.Context, input SendChatMessage
 	return results, nil
 }
 
-func (s *ChatService) attachMultiExecutionAnswer(ctx context.Context, input SendChatMessageInput, question string, agentContext AgentContext, conversation []query.AgentMessage, result *query.AgentResult, executions []*QueryExecutionResult, mergedSteps *[]query.AgentEvent, emit func(query.AgentEvent) error) {
-	if result == nil || len(result.SQLTasks) == 0 {
+func (s *ChatService) analyzeSingleExecution(ctx context.Context, input SendChatMessageInput, question string, agentContext AgentContext, result *query.AgentResult, execution *QueryExecutionResult, promptStatus string, promptDetail string, mergedSteps *[]query.AgentEvent, emit func(query.AgentEvent) error) (string, string) {
+	defaultStatus, defaultDetail := s.normalizedResultAnalysisPromptState(promptStatus, promptDetail)
+	if defaultStatus != resultAnalysisStatusAvailable || s.resultAnalyzer == nil || result == nil || execution == nil || len(execution.Rows) == 0 {
+		return defaultStatus, defaultDetail
+	}
+	task := singleResultSynthesisTask(result, execution, agentContext.Datasources)
+	analysis, status, detail := s.callResultAnalyzer(ctx, input, question, []query.AgentSQLTask{task}, []*QueryExecutionResult{execution}, result.ResultAnalysis, mergedSteps, emit)
+	if analysis == nil || !analysis.Success {
+		return status, detail
+	}
+	applyAnalysisToExecution(execution, analysis)
+	return status, detail
+}
+
+func (s *ChatService) analyzeMultipleExecutions(ctx context.Context, input SendChatMessageInput, question string, tasks []query.AgentSQLTask, executions []*QueryExecutionResult, plan query.AgentResultAnalysisPlan, promptStatus string, promptDetail string, mergedSteps *[]query.AgentEvent, emit func(query.AgentEvent) error) (*QueryExecutionResult, string, string) {
+	defaultStatus, defaultDetail := s.normalizedResultAnalysisPromptState(promptStatus, promptDetail)
+	if defaultStatus != resultAnalysisStatusAvailable || s.resultAnalyzer == nil || len(tasks) == 0 || len(executions) == 0 {
+		return nil, defaultStatus, defaultDetail
+	}
+	analysis, status, detail := s.callResultAnalyzer(ctx, input, question, tasks, executions, plan, mergedSteps, emit)
+	if analysis == nil || !analysis.Success {
+		return nil, status, detail
+	}
+	return executionFromAnalysis(input, question, tasks, analysis), status, detail
+}
+
+func (s *ChatService) callResultAnalyzer(ctx context.Context, input SendChatMessageInput, question string, tasks []query.AgentSQLTask, executions []*QueryExecutionResult, plan query.AgentResultAnalysisPlan, mergedSteps *[]query.AgentEvent, emit func(query.AgentEvent) error) (*ResultAnalysisResult, string, string) {
+	*mergedSteps = appendServiceAgentEvent(*mergedSteps, query.EventAction, "python.analyze", "调用无状态 Python 沙箱分析 SQL 结果集。", "", nil)
+	if err := emitAgentEvent(emit, (*mergedSteps)[len(*mergedSteps)-1]); err != nil {
+		s.logger.Warn("python analysis action emit failed",
+			append(chatLogFields(input, question, emit != nil), zap.Error(err))...,
+		)
+	}
+	analysis, err := s.resultAnalyzer.AnalyzeQueryResults(ctx, AnalyzeQueryResultsInput{
+		TenantID:       input.TenantID,
+		ProjectID:      input.ProjectID,
+		SessionID:      input.SessionID,
+		UserID:         input.UserID,
+		Question:       question,
+		RequestID:      input.RequestID,
+		Mode:           resultAnalysisMode(plan),
+		AnalysisGoal:   plan.AnalysisGoal,
+		TemplateName:   plan.TemplateName,
+		TemplateParams: plan.TemplateParams,
+		Tasks:          tasks,
+		Executions:     executions,
+	})
+	if err != nil {
+		content := "Python 沙箱结果分析失败，已保留原始 SQL 执行结果继续回答。"
+		*mergedSteps = appendServiceAgentEvent(*mergedSteps, query.EventObservation, "python.analyze", content, "", nil)
+		_ = emitAgentEvent(emit, (*mergedSteps)[len(*mergedSteps)-1])
+		s.logger.Warn("python analysis failed",
+			append(chatLogFields(input, question, emit != nil),
+				zap.Int("sql_task_count", len(tasks)),
+				zap.Int("execution_count", len(executions)),
+				zap.Error(err),
+			)...,
+		)
+		return nil, resultAnalysisStatusUnavailable, "Python exec 已启用但本轮调用失败；结果综合应只观察 SQL 原始执行结果。"
+	}
+	if analysis == nil {
+		return nil, resultAnalysisStatusUnavailable, "Python exec 已启用但本轮没有返回分析结果；结果综合应只观察 SQL 原始执行结果。"
+	}
+	if !analysis.Success {
+		content := firstNonEmptyService(analysis.Error, "Python 沙箱未能生成增强分析，已保留原始 SQL 执行结果。")
+		*mergedSteps = appendServiceAgentEvent(*mergedSteps, query.EventObservation, "python.analyze", content, "", nil)
+		_ = emitAgentEvent(emit, (*mergedSteps)[len(*mergedSteps)-1])
+		return analysis, resultAnalysisStatusUnavailable, "Python exec 已启用但本轮增强分析失败；结果综合应只观察 SQL 原始执行结果。"
+	}
+	content := firstNonEmptyService(analysis.Observation, analysis.Summary, "Python 沙箱已完成结果集分析。")
+	*mergedSteps = appendServiceAgentEvent(*mergedSteps, query.EventObservation, "python.analyze", content, "", nil)
+	_ = emitAgentEvent(emit, (*mergedSteps)[len(*mergedSteps)-1])
+	return analysis, resultAnalysisStatusAvailable, firstNonEmptyService(content, "Python exec 已完成本轮无状态增强分析；执行结果可能已包含增强表格、指标和图表建议。")
+}
+
+func (s *ChatService) currentResultAnalysisPromptState(ctx context.Context) (string, string) {
+	status, detail := s.defaultResultAnalysisPromptState()
+	if s.resultAnalyzer == nil {
+		if status == resultAnalysisStatusAvailable {
+			return resultAnalysisStatusUnavailable, "Python exec 已启用但当前未建立分析器；不要生成内部结果分析计划，本轮按 SQL 原始结果继续。"
+		}
+		return status, detail
+	}
+	if status != resultAnalysisStatusAvailable {
+		return status, detail
+	}
+	checker, ok := s.resultAnalyzer.(ResultAnalysisHealthChecker)
+	if !ok {
+		return status, detail
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, resultAnalysisPromptHealthTimeout)
+	defer cancel()
+	if err := checker.CheckHealth(checkCtx); err != nil {
+		return resultAnalysisStatusUnavailable, "Python exec 已启用但当前健康检查失败；不要生成内部结果分析计划，本轮按 SQL 原始结果继续。"
+	}
+	return status, detail
+}
+
+func (s *ChatService) defaultResultAnalysisPromptState() (string, string) {
+	return s.normalizedResultAnalysisPromptState(s.resultAnalysisStatus, s.resultAnalysisDetail)
+}
+
+func (s *ChatService) normalizedResultAnalysisPromptState(status string, detail string) (string, string) {
+	status = strings.ToLower(strings.TrimSpace(status))
+	detail = strings.TrimSpace(detail)
+	if status == "" {
+		status = resultAnalysisStatusDisabled
+	}
+	if detail == "" {
+		switch status {
+		case resultAnalysisStatusAvailable:
+			detail = "Python exec 已启用；本轮未产生额外增强结果时，结果综合继续观察 SQL 执行结果。"
+		case resultAnalysisStatusUnavailable:
+			detail = "Python exec 已启用但当前不可用；结果综合应只观察 SQL 原始执行结果。"
+		default:
+			detail = "Python exec 未启用；结果综合只观察 SQL 原始执行结果。"
+		}
+	}
+	return status, detail
+}
+
+func resultAnalysisMode(plan query.AgentResultAnalysisPlan) string {
+	mode := strings.ToLower(strings.TrimSpace(plan.Mode))
+	switch mode {
+	case "template", "code":
+		return mode
+	default:
+		return "auto"
+	}
+}
+
+func (s *ChatService) attachMultiExecutionAnswer(ctx context.Context, input SendChatMessageInput, question string, agentContext AgentContext, conversation []query.AgentMessage, result *query.AgentResult, tasks []query.AgentSQLTask, executions []*QueryExecutionResult, analysisStatus string, analysisDetail string, mergedSteps *[]query.AgentEvent, emit func(query.AgentEvent) error) {
+	if result == nil || len(tasks) == 0 {
 		return
 	}
-	summary, _ := s.synthesizeExecutionAnswer(ctx, input, question, agentContext, conversation, result.SQLTasks, executions, mergedSteps, emit)
+	summary, _ := s.synthesizeExecutionAnswer(ctx, input, question, agentContext, conversation, tasks, executions, analysisStatus, analysisDetail, mergedSteps, emit)
 	if summary == "" {
-		summary = summarizeMultiDatasourceExecutions(result.SQLTasks, executions)
+		summary = summarizeMultiDatasourceExecutions(tasks, executions)
 	}
 	if summary == "" {
 		return
@@ -805,12 +992,12 @@ func (s *ChatService) attachMultiExecutionAnswer(ctx context.Context, input Send
 	result.Explanation = summary
 }
 
-func (s *ChatService) attachSingleExecutionAnswer(ctx context.Context, input SendChatMessageInput, question string, agentContext AgentContext, conversation []query.AgentMessage, result *query.AgentResult, execution *QueryExecutionResult, mergedSteps *[]query.AgentEvent, emit func(query.AgentEvent) error) {
+func (s *ChatService) attachSingleExecutionAnswer(ctx context.Context, input SendChatMessageInput, question string, agentContext AgentContext, conversation []query.AgentMessage, result *query.AgentResult, execution *QueryExecutionResult, analysisStatus string, analysisDetail string, mergedSteps *[]query.AgentEvent, emit func(query.AgentEvent) error) {
 	if result == nil || execution == nil {
 		return
 	}
 	task := singleResultSynthesisTask(result, execution, agentContext.Datasources)
-	answer, synthesized := s.synthesizeExecutionAnswer(ctx, input, question, agentContext, conversation, []query.AgentSQLTask{task}, []*QueryExecutionResult{execution}, mergedSteps, emit)
+	answer, synthesized := s.synthesizeExecutionAnswer(ctx, input, question, agentContext, conversation, []query.AgentSQLTask{task}, []*QueryExecutionResult{execution}, analysisStatus, analysisDetail, mergedSteps, emit)
 	if answer == "" {
 		answer = strings.TrimSpace(execution.Answer)
 	}
@@ -827,7 +1014,7 @@ func (s *ChatService) attachSingleExecutionAnswer(ctx context.Context, input Sen
 	}
 }
 
-func (s *ChatService) synthesizeExecutionAnswer(ctx context.Context, input SendChatMessageInput, question string, agentContext AgentContext, conversation []query.AgentMessage, tasks []query.AgentSQLTask, executions []*QueryExecutionResult, mergedSteps *[]query.AgentEvent, emit func(query.AgentEvent) error) (string, bool) {
+func (s *ChatService) synthesizeExecutionAnswer(ctx context.Context, input SendChatMessageInput, question string, agentContext AgentContext, conversation []query.AgentMessage, tasks []query.AgentSQLTask, executions []*QueryExecutionResult, analysisStatus string, analysisDetail string, mergedSteps *[]query.AgentEvent, emit func(query.AgentEvent) error) (string, bool) {
 	if len(tasks) == 0 || len(executions) == 0 || !s.hasResultSynthesizer() {
 		return "", false
 	}
@@ -855,6 +1042,8 @@ func (s *ChatService) synthesizeExecutionAnswer(ctx context.Context, input SendC
 		Conversation:          conversation,
 		Tasks:                 tasks,
 		Executions:            executions,
+		ResultAnalysisStatus:  analysisStatus,
+		ResultAnalysisDetail:  analysisDetail,
 	})
 	if err != nil {
 		s.logger.Warn("chat result synthesis failed; using local summary",
@@ -927,6 +1116,15 @@ func singleResultSynthesisTask(result *query.AgentResult, execution *QueryExecut
 	}
 }
 
+func pythonAnalysisSynthesisTask(input SendChatMessageInput, tasks []query.AgentSQLTask) query.AgentSQLTask {
+	return query.AgentSQLTask{
+		DatasourceName: "Python exec",
+		Purpose:        "无状态 Python 增强分析结果",
+		SQL:            "",
+		Review:         aggregateSQLTaskReview(tasks, input.MaxRows),
+	}
+}
+
 func datasourceLabel(datasources []query.AgentDatasource, datasourceID uint64) (string, string) {
 	for _, datasource := range datasources {
 		if datasource.ID == datasourceID {
@@ -982,6 +1180,100 @@ func buildMultiDatasourceChartResult(input SendChatMessageInput, question string
 		Columns:       columns,
 		Rows:          rows,
 	}
+}
+
+func executionFromAnalysis(input SendChatMessageInput, question string, tasks []query.AgentSQLTask, analysis *ResultAnalysisResult) *QueryExecutionResult {
+	if analysis == nil || !analysis.Success {
+		return nil
+	}
+	table := firstAnalysisTable(analysis)
+	if table == nil || len(table.Rows) == 0 {
+		return nil
+	}
+	rows := copyRowsForAnalysis(table.Rows, len(table.Rows))
+	columns := append([]string(nil), table.Columns...)
+	chart := chartFromAnalysis(analysis, columns, rows)
+	rowCount := len(rows)
+	answer := strings.TrimSpace(analysis.Summary)
+	return &QueryExecutionResult{
+		Execution: &model.QueryExecution{
+			TenantID:     input.TenantID,
+			ProjectID:    input.ProjectID,
+			SessionID:    input.SessionID,
+			UserID:       input.UserID,
+			Question:     question,
+			Status:       "success",
+			RowCount:     &rowCount,
+			ChartType:    chart.Type,
+			CreatedAt:    time.Now(),
+			GeneratedSQL: sqlTaskDebugList(tasks),
+		},
+		Review:        aggregateSQLTaskReview(tasks, input.MaxRows),
+		Chart:         chart,
+		Answer:        answer,
+		SpeechSummary: answer,
+		Columns:       columns,
+		Rows:          rows,
+	}
+}
+
+func applyAnalysisToExecution(execution *QueryExecutionResult, analysis *ResultAnalysisResult) {
+	if execution == nil || analysis == nil || !analysis.Success {
+		return
+	}
+	table := firstAnalysisTable(analysis)
+	if table != nil && len(table.Rows) > 0 {
+		execution.Columns = append([]string(nil), table.Columns...)
+		execution.Rows = copyRowsForAnalysis(table.Rows, len(table.Rows))
+		rowCount := len(execution.Rows)
+		if execution.Execution != nil {
+			execution.Execution.RowCount = &rowCount
+		}
+	}
+	if chart := chartFromAnalysis(analysis, execution.Columns, execution.Rows); chart.Type != "" {
+		execution.Chart = chart
+		if execution.Execution != nil {
+			execution.Execution.ChartType = chart.Type
+		}
+	}
+	if strings.TrimSpace(analysis.Summary) != "" {
+		execution.Answer = strings.TrimSpace(analysis.Summary)
+		execution.SpeechSummary = strings.TrimSpace(analysis.Summary)
+	}
+}
+
+func firstAnalysisTable(analysis *ResultAnalysisResult) *ResultAnalysisTable {
+	if analysis == nil {
+		return nil
+	}
+	for i := range analysis.Tables {
+		if len(analysis.Tables[i].Rows) > 0 {
+			return &analysis.Tables[i]
+		}
+	}
+	if len(analysis.Tables) > 0 {
+		return &analysis.Tables[0]
+	}
+	return nil
+}
+
+func chartFromAnalysis(analysis *ResultAnalysisResult, columns []string, rows []map[string]any) query.ChartSuggestion {
+	if analysis != nil {
+		for _, chart := range analysis.Charts {
+			if strings.TrimSpace(chart.Type) == "" {
+				continue
+			}
+			return query.ChartSuggestion{
+				Type:       chart.Type,
+				XField:     chart.XField,
+				YFields:    append([]string(nil), chart.YFields...),
+				NameField:  chart.NameField,
+				ValueField: chart.ValueField,
+				Reason:     chart.Reason,
+			}
+		}
+	}
+	return query.SuggestChart(columns, rows)
 }
 
 func primaryExecutionNumber(result *QueryExecutionResult) (string, float64, string, bool) {

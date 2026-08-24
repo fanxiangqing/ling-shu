@@ -300,11 +300,244 @@ func TestChatServiceAutoExecuteSynthesizesSingleDatasourceResult(t *testing.T) {
 	if len(agent.synthesisInput.Tasks) != 1 || len(agent.synthesisInput.Executions) != 1 {
 		t.Fatalf("expected single execution synthesis context, got %+v", agent.synthesisInput)
 	}
+	if agent.synthesisInput.ResultAnalysisStatus != resultAnalysisStatusDisabled || !strings.Contains(agent.synthesisInput.ResultAnalysisDetail, "未启用") {
+		t.Fatalf("expected disabled python analysis prompt state, got status=%q detail=%q", agent.synthesisInput.ResultAnalysisStatus, agent.synthesisInput.ResultAnalysisDetail)
+	}
 	if result.Agent.Answer != agent.synthesisAnswer || result.Execution.Answer != agent.synthesisAnswer {
 		t.Fatalf("expected synthesized answer on agent and execution, got agent=%q execution=%q", result.Agent.Answer, result.Execution.Answer)
 	}
 	if !hasAgentEvent(result.Agent.Steps, query.EventAction, "result.synthesize") || !hasAgentEvent(result.Agent.Steps, query.EventObservation, "result.synthesize") {
 		t.Fatalf("expected result synthesis action and observation steps, got %+v", result.Agent.Steps)
+	}
+}
+
+func TestChatServiceAutoExecuteUsesPythonAnalysisResult(t *testing.T) {
+	chatRepo := &chatFakeRepository{
+		session: &model.ChatSession{
+			BaseModel: model.BaseModel{ID: 10},
+			TenantID:  1,
+			ProjectID: 2,
+			UserID:    3,
+			Status:    "active",
+		},
+	}
+	agent := &chatFakeAgentRunner{
+		result: &query.AgentResult{
+			Question:     "按省份统计销售额",
+			SQL:          "select province, amount from orders LIMIT 200",
+			Explanation:  "统计各省销售额",
+			DatasourceID: 7,
+			Dialect:      "mysql",
+			Review:       query.ReviewResult{Passed: true, NormalizedSQL: "select province, amount from orders LIMIT 200"},
+			ResultAnalysis: query.AgentResultAnalysisPlan{
+				Mode:         "code",
+				AnalysisGoal: "result = df.groupby('province', as_index=False)['amount'].sum()",
+			},
+		},
+	}
+	executor := &chatFakeQueryExecutor{
+		result: &QueryExecutionResult{
+			Execution: &model.QueryExecution{ID: 99, Status: "success", DatasourceID: 7},
+			Columns:   []string{"province", "amount"},
+			Rows:      []map[string]any{{"province": "浙江", "amount": int64(10)}},
+		},
+	}
+	analyzer := &chatFakeResultAnalyzer{
+		response: &ResultAnalysisResult{
+			Success:      true,
+			Summary:      "浙江销售额最高。",
+			Observation:  "Python 分析摘要：浙江销售额最高。",
+			AnalysisKind: "category",
+			TemplateName: "category_analysis",
+			Tables: []ResultAnalysisTable{{
+				Name:    "分类汇总",
+				Columns: []string{"province", "amount", "占比"},
+				Rows:    []map[string]any{{"province": "浙江", "amount": float64(10), "占比": float64(1)}},
+			}},
+			Charts: []ResultAnalysisChart{{
+				Type:       query.ChartPie,
+				NameField:  "province",
+				ValueField: "amount",
+				Reason:     "分类数量较少，适合占比展示",
+			}},
+		},
+	}
+	service := NewChatService(chatRepo, agent, executor)
+	service.SetResultAnalyzer(analyzer)
+
+	result, err := service.SendMessage(context.Background(), SendChatMessageInput{
+		TenantID:    1,
+		ProjectID:   2,
+		SessionID:   10,
+		UserID:      3,
+		Content:     "按省份统计销售额",
+		AutoExecute: true,
+		RequestID:   "rid-python-analysis",
+	})
+	if err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+	if analyzer.calls != 1 {
+		t.Fatalf("expected one python analysis call, got %d", analyzer.calls)
+	}
+	if analyzer.lastInput.RequestID != "rid-python-analysis" || analyzer.lastInput.TenantID != 1 || analyzer.lastInput.ProjectID != 2 || analyzer.lastInput.SessionID != 10 || analyzer.lastInput.UserID != 3 {
+		t.Fatalf("expected trace fields forwarded to analyzer, got %+v", analyzer.lastInput)
+	}
+	if analyzer.lastInput.Mode != "code" || !strings.Contains(analyzer.lastInput.AnalysisGoal, "groupby") {
+		t.Fatalf("expected internal python analysis plan forwarded, got %+v", analyzer.lastInput)
+	}
+	if agent.synthesisInput.ResultAnalysisStatus != resultAnalysisStatusAvailable || !strings.Contains(agent.synthesisInput.ResultAnalysisDetail, "Python 分析摘要") {
+		t.Fatalf("expected available python analysis prompt state, got status=%q detail=%q", agent.synthesisInput.ResultAnalysisStatus, agent.synthesisInput.ResultAnalysisDetail)
+	}
+	if result.Execution == nil || result.Execution.Answer != "浙江销售额最高。" || result.Execution.Chart.Type != query.ChartPie {
+		t.Fatalf("expected analyzed execution result, got %+v", result.Execution)
+	}
+	if len(result.Execution.Rows) != 1 || result.Execution.Columns[2] != "占比" {
+		t.Fatalf("expected analyzed table rows, columns=%+v rows=%+v", result.Execution.Columns, result.Execution.Rows)
+	}
+	if !hasAgentEvent(result.Agent.Steps, query.EventAction, "python.analyze") || !hasAgentEvent(result.Agent.Steps, query.EventObservation, "python.analyze") {
+		t.Fatalf("expected python analyze events, got %+v", result.Agent.Steps)
+	}
+}
+
+func TestChatServiceMultiDatasourceSynthesisUsesPythonAnalysisResult(t *testing.T) {
+	chatRepo := &chatFakeRepository{
+		session: &model.ChatSession{
+			BaseModel: model.BaseModel{ID: 10},
+			TenantID:  1,
+			ProjectID: 2,
+			UserID:    3,
+			Status:    "active",
+		},
+	}
+	agent := &chatFakeAgentRunner{
+		synthesisAnswer: "Python 增强结果显示灵数数据库用户数更高。",
+		result: &query.AgentResult{
+			Question:                "对比两个系统用户数",
+			Intent:                  query.AgentIntentMultiQuery,
+			Explanation:             "分别查询两个数据源后对比",
+			RequiresMultiDatasource: true,
+			DatasourceIDs:           []uint64{7, 8},
+			Review:                  query.ReviewResult{Passed: true, RiskLevel: "low"},
+			SQLTasks: []query.AgentSQLTask{
+				{DatasourceID: 7, DatasourceName: "灵数数据库", Purpose: "统计灵数用户数", SQL: "select count(*) as user_count from users", Review: query.ReviewResult{Passed: true}},
+				{DatasourceID: 8, DatasourceName: "问卷数据库", Purpose: "统计问卷用户数", SQL: "select count(*) as user_count from users", Review: query.ReviewResult{Passed: true}},
+			},
+		},
+	}
+	executor := &chatFakeQueryExecutor{
+		results: []*QueryExecutionResult{
+			{Execution: &model.QueryExecution{ID: 101, Status: "success", DatasourceID: 7}, Columns: []string{"user_count"}, Rows: []map[string]any{{"user_count": int64(2080)}}},
+			{Execution: &model.QueryExecution{ID: 102, Status: "success", DatasourceID: 8}, Columns: []string{"user_count"}, Rows: []map[string]any{{"user_count": int64(1200)}}},
+		},
+	}
+	analyzer := &chatFakeResultAnalyzer{
+		response: &ResultAnalysisResult{
+			Success:      true,
+			Summary:      "灵数数据库用户数更高。",
+			Observation:  "Python 跨源分析摘要：灵数数据库高于问卷数据库。",
+			AnalysisKind: "multi",
+			TemplateName: "multi_dataset_overview",
+			Tables: []ResultAnalysisTable{{
+				Name:    "跨源对比",
+				Columns: []string{"数据源", "user_count"},
+				Rows: []map[string]any{
+					{"数据源": "灵数数据库", "user_count": float64(2080)},
+					{"数据源": "问卷数据库", "user_count": float64(1200)},
+				},
+			}},
+		},
+	}
+	service := NewChatService(chatRepo, agent, executor)
+	service.SetResultAnalyzer(analyzer)
+
+	result, err := service.SendMessage(context.Background(), SendChatMessageInput{
+		TenantID:              1,
+		ProjectID:             2,
+		SessionID:             10,
+		UserID:                3,
+		Content:               "对比两个系统用户数",
+		SelectedDatasourceIDs: []uint64{7, 8},
+		AutoExecute:           true,
+	})
+	if err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+	if analyzer.calls != 1 {
+		t.Fatalf("expected one python analysis call, got %d", analyzer.calls)
+	}
+	if agent.synthesisInput.ResultAnalysisStatus != resultAnalysisStatusAvailable {
+		t.Fatalf("expected available python analysis prompt state, got %+v", agent.synthesisInput)
+	}
+	if len(agent.synthesisInput.Tasks) != 1 || agent.synthesisInput.Tasks[0].DatasourceName != "Python exec" {
+		t.Fatalf("expected synthesis to observe python analysis task, got %+v", agent.synthesisInput.Tasks)
+	}
+	if len(agent.synthesisInput.Executions) != 1 || len(agent.synthesisInput.Executions[0].Rows) != 2 {
+		t.Fatalf("expected synthesis to observe analyzed execution, got %+v", agent.synthesisInput.Executions)
+	}
+	if result.Execution == nil || result.Execution.Answer != agent.synthesisAnswer {
+		t.Fatalf("expected combined execution to carry synthesized python result, got %+v", result.Execution)
+	}
+}
+
+func TestChatServiceExecHealthFailureHidesAndSkipsPythonAnalysis(t *testing.T) {
+	chatRepo := &chatFakeRepository{
+		session: &model.ChatSession{
+			BaseModel: model.BaseModel{ID: 10},
+			TenantID:  1,
+			ProjectID: 2,
+			UserID:    3,
+			Status:    "active",
+		},
+	}
+	agent := &chatFakeAgentRunner{
+		synthesisAnswer: "浙江销售额为 10。",
+		result: &query.AgentResult{
+			Question:     "按省份统计销售额",
+			SQL:          "select province, amount from orders LIMIT 200",
+			Explanation:  "统计各省销售额",
+			DatasourceID: 7,
+			Dialect:      "mysql",
+			Review:       query.ReviewResult{Passed: true, NormalizedSQL: "select province, amount from orders LIMIT 200"},
+			ResultAnalysis: query.AgentResultAnalysisPlan{
+				Mode:         "code",
+				AnalysisGoal: "result = df",
+			},
+		},
+	}
+	executor := &chatFakeQueryExecutor{
+		result: &QueryExecutionResult{
+			Execution: &model.QueryExecution{ID: 99, Status: "success", DatasourceID: 7},
+			Columns:   []string{"province", "amount"},
+			Rows:      []map[string]any{{"province": "浙江", "amount": int64(10)}},
+		},
+	}
+	analyzer := &chatFakeResultAnalyzer{healthErr: errors.New("exec down")}
+	service := NewChatService(chatRepo, agent, executor)
+	service.SetResultAnalyzer(analyzer)
+
+	result, err := service.SendMessage(context.Background(), SendChatMessageInput{
+		TenantID:    1,
+		ProjectID:   2,
+		SessionID:   10,
+		UserID:      3,
+		Content:     "按省份统计销售额",
+		AutoExecute: true,
+	})
+	if err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+	if agent.lastInput.ResultAnalysisStatus != resultAnalysisStatusUnavailable {
+		t.Fatalf("expected unavailable exec status sent to text2sql prompt, got %+v", agent.lastInput)
+	}
+	if analyzer.calls != 0 {
+		t.Fatalf("expected python analysis call to be skipped, got %d", analyzer.calls)
+	}
+	if agent.synthesisInput.ResultAnalysisStatus != resultAnalysisStatusUnavailable {
+		t.Fatalf("expected unavailable exec status sent to result synthesis, got %+v", agent.synthesisInput)
+	}
+	if result.Execution == nil || len(result.Execution.Rows) != 1 || result.Execution.Chart.Type == query.ChartPie {
+		t.Fatalf("expected original SQL result without python enhancement, got %+v", result.Execution)
 	}
 }
 
@@ -1011,6 +1244,27 @@ func (e *chatFakeQueryExecutor) ExecuteSQL(ctx context.Context, input ExecuteSQL
 		return &QueryExecutionResult{}, nil
 	}
 	return e.result, nil
+}
+
+type chatFakeResultAnalyzer struct {
+	response  *ResultAnalysisResult
+	err       error
+	healthErr error
+	lastInput AnalyzeQueryResultsInput
+	calls     int
+}
+
+func (a *chatFakeResultAnalyzer) AnalyzeQueryResults(ctx context.Context, input AnalyzeQueryResultsInput) (*ResultAnalysisResult, error) {
+	a.lastInput = input
+	a.calls++
+	if a.err != nil {
+		return nil, a.err
+	}
+	return a.response, nil
+}
+
+func (a *chatFakeResultAnalyzer) CheckHealth(ctx context.Context) error {
+	return a.healthErr
 }
 
 type chatFakeKnowledgeProvider struct {

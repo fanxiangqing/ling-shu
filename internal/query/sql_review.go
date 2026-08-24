@@ -14,7 +14,6 @@ var (
 	topPattern          = regexp.MustCompile(`(?i)\bselect\s+(distinct\s+)?top\s+\d+\b`)
 	fetchPattern        = regexp.MustCompile(`(?i)\bfetch\s+first\s+\d+\s+rows\s+only\b`)
 	rownumPattern       = regexp.MustCompile(`(?i)\brownum\s*<=?\s*\d+\b`)
-	commentPattern      = regexp.MustCompile(`(?s)/\*.*?\*/|--[^\n\r]*`)
 )
 
 type SQLReviewer struct {
@@ -48,7 +47,8 @@ func (r *SQLReviewer) ReviewWithDialect(sqlText string, limit int, dialect strin
 		limit = r.MaxLimit
 	}
 
-	normalized := normalizeSQL(sqlText)
+	commentFreeSQL := stripSQLComments(sqlText)
+	normalized := normalizeSQL(commentFreeSQL)
 	result := ReviewResult{
 		Passed:        false,
 		RiskLevel:     "low",
@@ -61,30 +61,29 @@ func (r *SQLReviewer) ReviewWithDialect(sqlText string, limit int, dialect strin
 		result.BlockedReason = "SQL 不能为空"
 		return result
 	}
-	if strings.Count(normalized, ";") > 1 || (strings.Contains(normalized, ";") && !strings.HasSuffix(normalized, ";")) {
+	if hasMultipleSQLStatements(commentFreeSQL) {
 		result.RiskLevel = "high"
 		result.BlockedReason = "禁止多语句 SQL"
 		return result
 	}
 
-	withoutComments := strings.TrimSpace(commentPattern.ReplaceAllString(normalized, " "))
-	lower := strings.ToLower(withoutComments)
+	lower := strings.ToLower(normalized)
 	if !strings.HasPrefix(lower, "select ") && !strings.HasPrefix(lower, "with ") {
 		result.RiskLevel = "high"
 		result.BlockedReason = "仅允许 SELECT 查询"
 		return result
 	}
-	if blockedSQLPattern.MatchString(withoutComments) {
+	if blockedSQLPattern.MatchString(normalized) {
 		result.RiskLevel = "high"
 		result.BlockedReason = "SQL 包含禁止的写入或结构变更关键字"
 		return result
 	}
-	if dangerousSQLPattern.MatchString(withoutComments) {
+	if dangerousSQLPattern.MatchString(normalized) {
 		result.RiskLevel = "high"
 		result.BlockedReason = "SQL 包含危险函数或文件导出语句"
 		return result
 	}
-	if systemSchemaPattern.MatchString(withoutComments) {
+	if systemSchemaPattern.MatchString(normalized) {
 		result.RiskLevel = "high"
 		result.BlockedReason = "禁止访问系统库或元数据库"
 		return result
@@ -106,6 +105,143 @@ func (r *SQLReviewer) ReviewWithDialect(sqlText string, limit int, dialect strin
 func normalizeSQL(sqlText string) string {
 	fields := strings.Fields(strings.TrimSpace(sqlText))
 	return strings.Join(fields, " ")
+}
+
+func stripSQLComments(sqlText string) string {
+	var out strings.Builder
+	out.Grow(len(sqlText))
+	for index := 0; index < len(sqlText); index++ {
+		switch sqlText[index] {
+		case '\'':
+			end := scanQuotedSQL(sqlText, index, '\'', true)
+			out.WriteString(sqlText[index : end+1])
+			index = end
+		case '"':
+			end := scanQuotedSQL(sqlText, index, '"', true)
+			out.WriteString(sqlText[index : end+1])
+			index = end
+		case '`':
+			end := scanQuotedSQL(sqlText, index, '`', false)
+			out.WriteString(sqlText[index : end+1])
+			index = end
+		case '[':
+			end := scanBracketQuotedSQL(sqlText, index)
+			out.WriteString(sqlText[index : end+1])
+			index = end
+		case '-':
+			if index+1 < len(sqlText) && sqlText[index+1] == '-' {
+				out.WriteByte(' ')
+				index = scanLineCommentSQL(sqlText, index+2)
+				continue
+			}
+			out.WriteByte(sqlText[index])
+		case '/':
+			if index+1 < len(sqlText) && sqlText[index+1] == '*' {
+				out.WriteByte(' ')
+				index = scanBlockCommentSQL(sqlText, index+2)
+				continue
+			}
+			out.WriteByte(sqlText[index])
+		default:
+			out.WriteByte(sqlText[index])
+		}
+	}
+	return out.String()
+}
+
+func hasMultipleSQLStatements(sqlText string) bool {
+	for index := 0; index < len(sqlText); index++ {
+		switch sqlText[index] {
+		case '\'':
+			index = scanQuotedSQL(sqlText, index, '\'', true)
+		case '"':
+			index = scanQuotedSQL(sqlText, index, '"', true)
+		case '`':
+			index = scanQuotedSQL(sqlText, index, '`', false)
+		case '[':
+			index = scanBracketQuotedSQL(sqlText, index)
+		case '-':
+			if index+1 < len(sqlText) && sqlText[index+1] == '-' {
+				index = scanLineCommentSQL(sqlText, index+2)
+			}
+		case '/':
+			if index+1 < len(sqlText) && sqlText[index+1] == '*' {
+				index = scanBlockCommentSQL(sqlText, index+2)
+			}
+		case ';':
+			return hasSQLCodeAfterTerminator(sqlText[index+1:])
+		}
+	}
+	return false
+}
+
+func hasSQLCodeAfterTerminator(sqlText string) bool {
+	for index := 0; index < len(sqlText); index++ {
+		switch sqlText[index] {
+		case ' ', '\t', '\n', '\r', '\f':
+			continue
+		case '-':
+			if index+1 < len(sqlText) && sqlText[index+1] == '-' {
+				index = scanLineCommentSQL(sqlText, index+2)
+				continue
+			}
+			return true
+		case '/':
+			if index+1 < len(sqlText) && sqlText[index+1] == '*' {
+				index = scanBlockCommentSQL(sqlText, index+2)
+				continue
+			}
+			return true
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+func scanQuotedSQL(sqlText string, start int, quote byte, allowBackslashEscape bool) int {
+	for index := start + 1; index < len(sqlText); index++ {
+		if allowBackslashEscape && sqlText[index] == '\\' && index+1 < len(sqlText) {
+			index++
+			continue
+		}
+		if sqlText[index] != quote {
+			continue
+		}
+		if index+1 < len(sqlText) && sqlText[index+1] == quote {
+			index++
+			continue
+		}
+		return index
+	}
+	return len(sqlText) - 1
+}
+
+func scanBracketQuotedSQL(sqlText string, start int) int {
+	for index := start + 1; index < len(sqlText); index++ {
+		if sqlText[index] == ']' {
+			return index
+		}
+	}
+	return len(sqlText) - 1
+}
+
+func scanLineCommentSQL(sqlText string, start int) int {
+	for index := start; index < len(sqlText); index++ {
+		if sqlText[index] == '\n' || sqlText[index] == '\r' {
+			return index
+		}
+	}
+	return len(sqlText) - 1
+}
+
+func scanBlockCommentSQL(sqlText string, start int) int {
+	for index := start; index+1 < len(sqlText); index++ {
+		if sqlText[index] == '*' && sqlText[index+1] == '/' {
+			return index + 1
+		}
+	}
+	return len(sqlText) - 1
 }
 
 func ensureLimit(sqlText string, limit int) string {
