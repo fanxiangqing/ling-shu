@@ -87,11 +87,9 @@ func (p *AliyunProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	}
 
 	body := map[string]any{
-		"model":    model,
-		"messages": req.Messages,
-		"extra_body": map[string]any{
-			"enable_thinking": false,
-		},
+		"model":           model,
+		"messages":        req.Messages,
+		"enable_thinking": false,
 	}
 	if req.Temperature != nil {
 		body["temperature"] = *req.Temperature
@@ -143,12 +141,10 @@ func (p *AliyunProvider) StreamChat(ctx context.Context, req ChatRequest, onEven
 	}
 
 	body := map[string]any{
-		"model":    model,
-		"messages": req.Messages,
-		"stream":   true,
-		"extra_body": map[string]any{
-			"enable_thinking": false,
-		},
+		"model":           model,
+		"messages":        req.Messages,
+		"stream":          true,
+		"enable_thinking": false,
 	}
 	if req.Temperature != nil {
 		body["temperature"] = *req.Temperature
