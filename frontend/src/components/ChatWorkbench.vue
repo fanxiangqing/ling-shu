@@ -11,7 +11,10 @@ import {
   NTooltip
 } from 'naive-ui'
 import { Mic, SendHorizontal, Sparkles } from '@lucide/vue'
-import type { AgentEvent, ChartSuggestion, ChatMessage, DataSourceOption, QueryExecutionResult } from '@/types/domain'
+import ResultChart from '@/components/common/ResultChart.vue'
+import type { AgentEvent, ChatMessage, DataSourceOption, QueryExecutionResult } from '@/types/domain'
+import { renderMarkdown } from '@/utils/markdown'
+import { chartDescription, chartKindLabel, chartTitle, formatCell, resolveChartKind, resultColumns, resultRows } from '@/utils/resultCharts'
 
 const props = defineProps<{
   messages: ChatMessage[]
@@ -39,7 +42,6 @@ const draft = ref('')
 const isComposing = ref(false)
 const compositionLockUntil = ref(0)
 const scrollbarRef = ref<{ scrollTo: (options: { top: number; behavior?: ScrollBehavior }) => void } | null>(null)
-const chartColors = ['#0f8f6b', '#2d6cdf', '#f59e0b', '#ef6f6c', '#8b5cf6', '#14b8a6', '#64748b', '#d946ef']
 const voiceBars = [32, 54, 42, 72, 48, 86, 58, 68, 38, 76, 44, 62, 34, 52, 46, 80, 56, 70]
 
 const activeSourceLabel = computed(() => {
@@ -131,9 +133,9 @@ function executionTitle(message: ChatMessage, result: QueryExecutionResult, inde
 }
 
 function executionTag(message: ChatMessage, result: QueryExecutionResult, index: number) {
-  if (isCombinedExecution(message, result)) return chartKind(result)
+  if (isCombinedExecution(message, result)) return chartKindLabel(chartKind(result))
   const task = executionTask(message, result, index)
-  return task?.datasource_name || (task?.datasource_id ? `数据源 #${task.datasource_id}` : chartKind(result))
+  return task?.datasource_name || (task?.datasource_id ? `数据源 #${task.datasource_id}` : chartKindLabel(chartKind(result)))
 }
 
 function executionTask(message: ChatMessage, result: QueryExecutionResult, index: number) {
@@ -155,193 +157,8 @@ function combinedExecutionOffset(message: ChatMessage, index: number) {
   return hasCombinedExecution(message) ? index - 1 : index
 }
 
-function resultRows(result?: QueryExecutionResult) {
-  return result?.rows || []
-}
-
-function resultColumns(result?: QueryExecutionResult) {
-  if (result?.columns?.length) return result.columns
-  return Object.keys(result?.rows?.[0] || {})
-}
-
 function chartKind(result?: QueryExecutionResult) {
-  const raw = (result?.chart?.type || result?.execution?.chart_type || '').toLowerCase()
-  if (['line', 'bar', 'pie', 'funnel', 'radar', 'table'].includes(raw)) return raw
-  return inferChartKind(result)
-}
-
-function inferChartKind(result?: QueryExecutionResult) {
-  const rows = resultRows(result)
-  const columns = resultColumns(result)
-  const numeric = numericFields(rows, columns)
-  if (!rows.length || !numeric.length) return 'table'
-  if (firstTimeField(rows, columns)) return 'line'
-  if (firstLabelField(rows, columns, numeric) && rows.length <= 8) return 'pie'
-  if (numeric.length >= 3 && rows.length === 1) return 'radar'
-  return 'bar'
-}
-
-function chartTitle(result?: QueryExecutionResult) {
-  const kind = chartKind(result)
-  if (result?.chart?.title) return result.chart.title
-  const names: Record<string, string> = {
-    line: '趋势分析',
-    bar: '分类对比',
-    pie: '占比分析',
-    funnel: '转化漏斗',
-    radar: '多指标雷达',
-    table: '明细结果'
-  }
-  return names[kind] || '查询结果'
-}
-
-function chartDescription(result?: QueryExecutionResult) {
-  if (result?.chart?.reason) return result.chart.reason
-  const rows = resultRows(result).length
-  return rows ? `返回 ${rows} 行数据，已自动选择适合的展示方式。` : '暂无可视化数据。'
-}
-
-function chartData(result?: QueryExecutionResult) {
-  const rows = resultRows(result)
-  const columns = resultColumns(result)
-  const numeric = numericFields(rows, columns)
-  const labelField = chartLabelField(result?.chart, rows, columns, numeric)
-  const valueField = chartValueField(result?.chart, numeric)
-  if (!rows.length || !valueField) return []
-  const values = rows
-    .map((row, index) => ({
-      label: formatCell(row[labelField] ?? row[columns[0]] ?? `第 ${index + 1} 项`),
-      value: toNumber(row[valueField]) || 0,
-      color: chartColors[index % chartColors.length]
-    }))
-    .filter((item) => Number.isFinite(item.value))
-    .slice(0, 12)
-  const max = Math.max(...values.map((item) => Math.abs(item.value)), 0)
-  const total = values.reduce((sum, item) => sum + Math.abs(item.value), 0)
-  return values.map((item) => ({
-    ...item,
-    width: max > 0 ? Math.max(4, Math.round((Math.abs(item.value) / max) * 100)) : 0,
-    percent: total > 0 ? Math.round((Math.abs(item.value) / total) * 1000) / 10 : 0
-  }))
-}
-
-function chartLabelField(chart: ChartSuggestion | undefined, rows: Record<string, unknown>[], columns: string[], numeric: string[]) {
-  return chart?.name_field || chart?.x_field || firstTimeField(rows, columns) || firstLabelField(rows, columns, numeric) || columns[0]
-}
-
-function chartValueField(chart: ChartSuggestion | undefined, numeric: string[]) {
-  return chart?.value_field || chart?.y_fields?.[0] || numeric[0]
-}
-
-function numericFields(rows: Record<string, unknown>[], columns: string[]) {
-  return columns.filter((column) => {
-    const checked = rows.filter((row) => row[column] !== null && row[column] !== undefined && row[column] !== '')
-    return checked.length > 0 && checked.every((row) => Number.isFinite(toNumber(row[column])))
-  })
-}
-
-function firstTimeField(rows: Record<string, unknown>[], columns: string[]) {
-  return columns.find((column) => {
-    const name = column.toLowerCase()
-    if (name.includes('date') || name.includes('time') || name.includes('day') || name.includes('month') || name.includes('日期') || name.includes('时间')) {
-      return true
-    }
-    return rows.some((row) => typeof row[column] === 'string' && /^\d{4}[-/]\d{1,2}[-/]\d{1,2}|^\d{1,2}[-/]\d{1,2}$/.test(String(row[column])))
-  })
-}
-
-function firstLabelField(rows: Record<string, unknown>[], columns: string[], numeric: string[]) {
-  return columns.find((column) => !numeric.includes(column) && rows.some((row) => row[column] !== null && row[column] !== undefined && row[column] !== ''))
-}
-
-function toNumber(value: unknown) {
-  if (typeof value === 'number') return value
-  if (typeof value === 'string') {
-    const parsed = Number(value.replace(/,/g, '').replace('%', '').trim())
-    return Number.isFinite(parsed) ? parsed : Number.NaN
-  }
-  return Number.NaN
-}
-
-function formatNumber(value: number) {
-  return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(value)
-}
-
-function formatCell(value: unknown) {
-  if (value === null || value === undefined) return '-'
-  if (typeof value === 'number') return formatNumber(value)
-  return String(value)
-}
-
-function pieGradient(result?: QueryExecutionResult) {
-  const data = chartData(result)
-  if (!data.length) return '#edf3ef'
-  let start = 0
-  const parts = data.map((item) => {
-    const end = start + item.percent
-    const segment = `${item.color} ${start}% ${end}%`
-    start = end
-    return segment
-  })
-  return `conic-gradient(${parts.join(', ')})`
-}
-
-function linePoints(result?: QueryExecutionResult) {
-  const data = chartData(result).slice(0, 16)
-  const values = data.map((item) => item.value)
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  const span = max - min || 1
-  const width = 640
-  const height = 220
-  const left = 32
-  const right = 24
-  const top = 18
-  const bottom = 34
-  const plotWidth = width - left - right
-  const plotHeight = height - top - bottom
-  return data.map((item, index) => ({
-    ...item,
-    x: left + (data.length === 1 ? plotWidth / 2 : (index / (data.length - 1)) * plotWidth),
-    y: top + ((max - item.value) / span) * plotHeight
-  }))
-}
-
-function linePath(result?: QueryExecutionResult) {
-  return linePoints(result).map((point) => `${point.x},${point.y}`).join(' ')
-}
-
-function radarPoints(result?: QueryExecutionResult) {
-  const rows = resultRows(result)
-  const columns = resultColumns(result)
-  const numeric = numericFields(rows, columns)
-  const source = rows.length === 1 && numeric.length >= 3
-    ? numeric.slice(0, 8).map((field, index) => ({
-        label: field,
-        value: toNumber(rows[0][field]) || 0,
-        color: chartColors[index % chartColors.length]
-      }))
-    : chartData(result).slice(0, 8)
-  const max = Math.max(...source.map((item) => Math.abs(item.value)), 1)
-  const center = 120
-  const radius = 84
-  return source.map((item, index) => {
-    const angle = (Math.PI * 2 * index) / source.length - Math.PI / 2
-    const scale = Math.abs(item.value) / max
-    const axisX = center + Math.cos(angle) * radius
-    const axisY = center + Math.sin(angle) * radius
-    return {
-      ...item,
-      axisX,
-      axisY,
-      x: center + Math.cos(angle) * radius * scale,
-      y: center + Math.sin(angle) * radius * scale
-    }
-  })
-}
-
-function radarPolygon(result?: QueryExecutionResult) {
-  return radarPoints(result).map((point) => `${point.x},${point.y}`).join(' ')
+  return resolveChartKind(result)
 }
 
 function tableColumns(result?: QueryExecutionResult) {
@@ -355,6 +172,10 @@ function tableColumns(result?: QueryExecutionResult) {
 
 function tableRows(result?: QueryExecutionResult) {
   return resultRows(result).slice(0, 8).map((row, index) => ({ ...row, rowKey: index }))
+}
+
+function renderMessageContent(content: string) {
+  return renderMarkdown(content)
 }
 
 function messageSteps(message: ChatMessage) {
@@ -490,7 +311,7 @@ function hasSQL(message: ChatMessage) {
             {{ assistantLabel }}
             <NTag v-if="message.pending" size="small" round>运行中</NTag>
           </div>
-          <p>{{ message.content }}</p>
+          <div class="message-markdown" v-html="renderMessageContent(message.content)" />
 
           <section v-if="message.role === 'assistant' && messageSteps(message).length" class="agent-step-card">
             <header class="step-head">
@@ -543,86 +364,7 @@ function hasSQL(message: ChatMessage) {
                 <NTag size="small" round>{{ executionTag(message, result, resultIndex) }}</NTag>
               </header>
 
-              <div
-                v-if="resultRows(result).length && chartKind(result) === 'pie'"
-                class="chart-view pie-view"
-              >
-                <div class="pie-donut" :style="{ background: pieGradient(result) }">
-                  <span>{{ resultRows(result).length }} 项</span>
-                </div>
-                <div class="chart-legend">
-                  <div v-for="item in chartData(result)" :key="item.label" class="legend-row">
-                    <i :style="{ background: item.color }" />
-                    <span>{{ item.label }}</span>
-                    <strong>{{ item.percent }}%</strong>
-                  </div>
-                </div>
-              </div>
-
-              <div
-                v-else-if="resultRows(result).length && chartKind(result) === 'line'"
-                class="chart-view line-view"
-              >
-                <svg viewBox="0 0 640 220" role="img" aria-label="趋势图">
-                  <line x1="32" y1="186" x2="616" y2="186" />
-                  <polyline :points="linePath(result)" />
-                  <circle
-                    v-for="point in linePoints(result)"
-                    :key="`${point.label}-${point.x}`"
-                    :cx="point.x"
-                    :cy="point.y"
-                    r="4"
-                  />
-                </svg>
-                <div class="axis-labels">
-                  <span v-for="point in linePoints(result).slice(0, 6)" :key="point.label">
-                    {{ point.label }}
-                  </span>
-                </div>
-              </div>
-
-              <div
-                v-else-if="resultRows(result).length && chartKind(result) === 'radar'"
-                class="chart-view radar-view"
-              >
-                <svg viewBox="0 0 240 240" role="img" aria-label="雷达图">
-                  <circle cx="120" cy="120" r="84" />
-                  <circle cx="120" cy="120" r="56" />
-                  <circle cx="120" cy="120" r="28" />
-                  <line
-                    v-for="point in radarPoints(result)"
-                    :key="`${point.label}-axis`"
-                    x1="120"
-                    y1="120"
-                    :x2="point.axisX"
-                    :y2="point.axisY"
-                  />
-                  <polygon :points="radarPolygon(result)" />
-                  <circle
-                    v-for="point in radarPoints(result)"
-                    :key="`${point.label}-point`"
-                    :cx="point.x"
-                    :cy="point.y"
-                    r="3.5"
-                  />
-                </svg>
-                <div class="chart-legend compact">
-                  <div v-for="item in radarPoints(result)" :key="item.label" class="legend-row">
-                    <span>{{ item.label }}</span>
-                    <strong>{{ formatNumber(item.value) }}</strong>
-                  </div>
-                </div>
-              </div>
-
-              <div v-else-if="resultRows(result).length && chartKind(result) !== 'table'" class="chart-view bar-view">
-                <div v-for="item in chartData(result)" :key="item.label" class="bar-row">
-                  <span>{{ item.label }}</span>
-                  <div class="bar-track">
-                    <i :style="{ width: `${item.width}%`, background: item.color }" />
-                  </div>
-                  <strong>{{ formatNumber(item.value) }}</strong>
-                </div>
-              </div>
+              <ResultChart v-if="resultRows(result).length && chartKind(result) !== 'table'" :result="result" />
 
               <NDataTable
                 v-if="tableRows(result).length"

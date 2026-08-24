@@ -13,6 +13,9 @@
     "@vicons/ionicons5": "^0.13.0",
     "axios": "^1.18.0",
     "dayjs": "^1.11.21",
+    "dompurify": "^3.4.14",
+    "echarts": "^6.1.0",
+    "markdown-it": "^15.0.0",
     "naive-ui": "^2.40.1",
     "pinia": "^2.3.0",
     "vue": "^3.5.13"
