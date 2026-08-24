@@ -10,7 +10,7 @@ resources:
   - mysql.yaml
   - redis.yaml
   - milvus.yaml
+  - exec.yaml
   - deployment.yaml
   - service.yaml
   - ingress.yaml
-

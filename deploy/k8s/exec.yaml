@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ling-shu-exec
+  labels:
+    app.kubernetes.io/name: ling-shu
+    app.kubernetes.io/component: exec
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ling-shu
+      app.kubernetes.io/component: exec
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ling-shu
+        app.kubernetes.io/component: exec
+    spec:
+      containers:
+        - name: exec
+          image: ling-shu-exec:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: grpc
+              containerPort: 50051
+          env:
+            - name: EXEC_GRPC_LISTEN
+              value: "0.0.0.0:50051"
+            - name: EXEC_TIMEOUT_MS
+              value: "10000"
+            - name: EXEC_MAX_INPUT_ROWS
+              value: "5000"
+            - name: EXEC_MAX_OUTPUT_ROWS
+              value: "1000"
+            - name: EXEC_MAX_STDOUT_CHARS
+              value: "10000"
+            - name: EXEC_MEMORY_LIMIT_MB
+              value: "512"
+            - name: EXEC_LOG_LEVEL
+              value: "info"
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: exec
+  labels:
+    app.kubernetes.io/name: ling-shu
+    app.kubernetes.io/component: exec
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ling-shu
+    app.kubernetes.io/component: exec
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc

@@ -47,6 +47,7 @@ The backend keeps the core analytics flow clear and modular: project management,
 ## Tech Stack
 
 - Backend: Go, Gin, GORM, Zap
+- Result analysis sandbox: Python, gRPC, pandas, numpy
 - Frontend: Vue 3, TypeScript, Vite, Naive UI
 - Database: MySQL 8
 - Cache: Redis
@@ -72,6 +73,8 @@ flowchart LR
   Agent --> Review["SQL review"]
   Review --> Executor["Read-only query executor"]
   Executor --> Sources[("Project data sources")]
+  Executor --> PyExec["Stateless Python exec result analysis"]
+  PyExec --> Agent
 
   Knowledge --> RAG["RAG retriever / indexer"]
   RAG --> Milvus[("Milvus vector store")]
@@ -90,6 +93,7 @@ The runtime has three clear boundaries:
 - **Control plane**: tenants, users, projects, data source bindings, provider configs, permissions, and audit logs live in MySQL.
 - **Knowledge plane**: business terms, metric definitions, FewShot SQL, and document chunks are embedded and retrieved from Milvus.
 - **Execution plane**: the agent only executes reviewed read-only SQL against project-bound data sources.
+- **Analysis plane**: Python exec is a stateless gRPC service. It only receives reviewed query result copies from Go, uses pandas/numpy for structured summaries, metrics, and chart suggestions, and does not connect to business databases or store session state.
 
 ## Supported Data Sources
 
@@ -110,6 +114,7 @@ Implemented connector registry:
 cmd/server/        HTTP server entrypoint
 configs/           Configuration examples
 docs/              Architecture and design notes
+exec/              Stateless Python result-analysis gRPC service
 frontend/          Vue 3 frontend
 internal/          Application modules
   aliyun/          Alibaba Cloud SDK integrations (e.g. NLS)
@@ -136,6 +141,7 @@ pkg/               Shared packages
   response/        Unified API response
   secret/          Secret encryption codec
 prompts/           Prompt templates
+shared/proto/      Cross-language gRPC contracts
 scripts/mysql/     MySQL schema scripts
 deploy/            Deployment manifests
   docker/          Docker Compose full-stack deployment
@@ -164,6 +170,18 @@ export LING_SHU_ALIYUN_NLS_APP_KEY="your-nls-app-key"
 ```
 
 ASR and TTS are optional. If TTS is disabled, voice questions can still return transcript and ChatBI results, but no speech audio will be generated.
+
+Python exec is an optional enhancement. It is disabled by default in the local config. When enabled, Go sends SQL execution result copies to the `exec` gRPC service for stateless analysis, and `request_id`, tenant, project, session, and user fields are propagated through API logs, Python logs, and audit records.
+
+```bash
+export LING_SHU_EXEC_ENABLED=true
+export LING_SHU_EXEC_GRPC_ADDR=127.0.0.1:50051
+export LING_SHU_EXEC_FAIL_OPEN=true
+```
+
+With `LING_SHU_EXEC_FAIL_OPEN=true`, the ChatBI flow keeps the raw SQL result if Python exec is unavailable. Set it to `false` to make exec a hard readiness dependency.
+
+When exec is enabled, Go internally chooses the right Python analysis strategy. This capability is not exposed as an end-user option. The result synthesis prompt switches by runtime status: `disabled` only observes raw SQL results, `available` may use Python-enhanced tables/metrics/chart suggestions, and `unavailable` falls back to raw results without exposing internal exec failures to end users. See [exec/README.md](/Users/fanxiangqing/Developer/golang/ling-shu/exec/README.md) for local debugging, configuration, and trace fields.
 
 ## Third-Party Embedding
 
@@ -409,11 +427,15 @@ If the project has ASR/TTS configured, `/embed/bootstrap` returns capability fla
 
 ### Docker Compose
 
+The full local stack lives in [deploy/docker](/Users/fanxiangqing/Developer/golang/ling-shu/deploy/docker):
+
 ```bash
-docker compose up --build
+cd deploy/docker
+cp .env.example .env
+docker compose --env-file .env up -d --build
 ```
 
-The compose stack starts the API server, MySQL, and Redis. MySQL initializes from:
+The compose stack starts the API server, Web console, stateless Python exec, MySQL, Redis, and Milvus. MySQL initializes from:
 
 ```text
 scripts/mysql/001_init_schema.sql
@@ -421,7 +443,7 @@ scripts/mysql/001_init_schema.sql
 
 This first-run schema already includes the `embed_apps` and `embed_sessions` tables required by third-party embedding. Existing databases should apply incremental scripts in numeric order; this feature requires `scripts/mysql/007_embed_apps.sql`, which also adds the encrypted `App Secret` column when needed.
 
-Milvus can be started separately:
+If you only want to start Milvus separately:
 
 ```bash
 docker compose -f docker-compose-milvus.yml up -d
@@ -435,6 +457,28 @@ go run ./cmd/server -config configs/config.yaml
 ```
 
 The API server listens on `http://localhost:8080` by default.
+
+### Python Exec
+
+For local Python exec debugging, use a virtual environment:
+
+```bash
+cd exec
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+EXEC_GRPC_LISTEN=127.0.0.1:50051 .venv/bin/python server.py
+```
+
+Then start the Go backend in another terminal with:
+
+```bash
+export LING_SHU_EXEC_ENABLED=true
+export LING_SHU_EXEC_GRPC_ADDR=127.0.0.1:50051
+```
+
+The exec service holds no sessions, persists no business data, and never talks directly to data sources. Each request starts from the provided result rows, runs analysis in a child process, then removes its temporary directory.
+
+See [exec/README.md](/Users/fanxiangqing/Developer/golang/ling-shu/exec/README.md) for configuration, limits, and trace logging fields.
 
 ### Frontend
 
@@ -463,6 +507,7 @@ sequenceDiagram
   participant Agent as ReAct Agent
   participant SQL as SQL Reviewer
   participant DB as Data Source
+  participant PyExec as Python exec
   participant LLM as Result Synthesis LLM
   participant Audit as Audit Log
 
@@ -476,6 +521,8 @@ sequenceDiagram
   SQL-->>Agent: Approved SQL or rejection reason
   Chat->>DB: Execute approved read-only query
   DB-->>Chat: Rows, execution stats, chart suggestion
+  Chat->>PyExec: Send result copies and trace metadata
+  PyExec-->>Chat: Stateless analysis tables, metrics, and chart suggestions
   Chat->>LLM: Observe execution results and synthesize the final answer
   LLM-->>Chat: Business-facing answer or fallback signal
   opt LLM synthesis unavailable
@@ -490,6 +537,7 @@ Core principles:
 - **Metadata first**: Text2SQL prompts are grounded in synced schemas, table comments, column comments, keys, and project bindings.
 - **Business language first**: RAG injects domain terms and metric definitions so users can ask with words like "GMV", "active users", or internal aliases.
 - **Safety before execution**: SQL is parsed and reviewed before execution. Write statements, DDL, multi-statement payloads, and unsafe patterns are blocked.
+- **Python sandbox stays stateless**: Go owns permissions, SQL review, audit, and chat/session state. Python only analyzes the result copies sent for the current request, and logs carry `request_id`, tenant, project, session, and user fields.
 - **Iterative ReAct loop**: the agent repeats Thought -> Action -> Observation until it has enough trustworthy data or needs user clarification.
 - **Small surface area**: the backend keeps the ordinary CRUD path simple and isolates high-change AI, RAG, provider, and connector code behind focused modules.
 - **Observation after tools**: after SQL execution, returned rows are fed back into result synthesis so the answer is based on tool observations, with local summaries as a fallback.

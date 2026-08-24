@@ -13,6 +13,8 @@ services:
         condition: service_healthy
       milvus:
         condition: service_started
+      exec:
+        condition: service_healthy
     environment:
       LING_SHU_APP_ENV: production
       LING_SHU_SERVER_HOST: 0.0.0.0
@@ -33,6 +35,13 @@ services:
       LING_SHU_REDIS_METADATA_CACHE_TTL: 10m
       LING_SHU_MILVUS_ENABLED: ${LING_SHU_MILVUS_ENABLED:-true}
       LING_SHU_MILVUS_ADDR: milvus:19530
+      LING_SHU_EXEC_ENABLED: ${LING_SHU_EXEC_ENABLED:-true}
+      LING_SHU_EXEC_GRPC_ADDR: exec:50051
+      LING_SHU_EXEC_TIMEOUT: ${LING_SHU_EXEC_TIMEOUT:-10s}
+      LING_SHU_EXEC_MAX_INPUT_ROWS: ${LING_SHU_EXEC_MAX_INPUT_ROWS:-5000}
+      LING_SHU_EXEC_MAX_OUTPUT_ROWS: ${LING_SHU_EXEC_MAX_OUTPUT_ROWS:-1000}
+      LING_SHU_EXEC_MAX_STDOUT_CHARS: ${LING_SHU_EXEC_MAX_STDOUT_CHARS:-10000}
+      LING_SHU_EXEC_FAIL_OPEN: ${LING_SHU_EXEC_FAIL_OPEN:-true}
       LING_SHU_JWT_SECRET: ${LING_SHU_JWT_SECRET:?LING_SHU_JWT_SECRET is required}
       LING_SHU_DSN_SECRET: ${LING_SHU_DSN_SECRET:?LING_SHU_DSN_SECRET is required}
       LING_SHU_ALIYUN_API_KEY: ${LING_SHU_ALIYUN_API_KEY:-}
@@ -45,6 +54,30 @@ services:
       - "${LING_SHU_API_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+    networks:
+      - ling-shu
+
+  exec:
+    build:
+      context: ../../exec
+      dockerfile: Dockerfile
+    image: ling-shu-exec:${LING_SHU_IMAGE_TAG:-latest}
+    container_name: ling-shu-exec
+    restart: unless-stopped
+    environment:
+      EXEC_GRPC_LISTEN: 0.0.0.0:50051
+      EXEC_TIMEOUT_MS: ${EXEC_TIMEOUT_MS:-10000}
+      EXEC_MAX_INPUT_ROWS: ${EXEC_MAX_INPUT_ROWS:-5000}
+      EXEC_MAX_OUTPUT_ROWS: ${EXEC_MAX_OUTPUT_ROWS:-1000}
+      EXEC_MAX_STDOUT_CHARS: ${EXEC_MAX_STDOUT_CHARS:-10000}
+      EXEC_MEMORY_LIMIT_MB: ${EXEC_MEMORY_LIMIT_MB:-512}
+      EXEC_LOG_LEVEL: ${EXEC_LOG_LEVEL:-info}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',50051), 2); s.close()"]
       interval: 10s
       timeout: 3s
       retries: 6

@@ -4,14 +4,14 @@
 
 ## 中文
 
-这一组文件用于在单机上通过 Docker Compose 一键拉起 Ling-Shu 全栈：后端 API、前端 Web、MySQL、Redis 以及 Milvus 全套依赖（etcd / minio / standalone）。
+这一组文件用于在单机上通过 Docker Compose 一键拉起 Ling-Shu 全栈：后端 API、前端 Web、无状态 Python exec 结果分析服务、MySQL、Redis 以及 Milvus 全套依赖（etcd / minio / standalone）。
 
 > 仅做本地快速验证时，可直接使用仓库根目录的 `docker-compose.yml`（不含前端和 Milvus）。生产/完整体验请使用本目录。
 
 ### 目录内容
 
 - `docker-compose.yml`：完整服务编排，API 和 Web 镜像从源码构建。
-- `.env.example`：环境变量模板，包含端口、密钥和可选的阿里云配置。
+- `.env.example`：环境变量模板，包含端口、密钥、Python exec、RAG 和可选的阿里云配置。
 
 ### 使用方式
 
@@ -29,13 +29,15 @@ cp .env.example .env
 
 3. 如需语音能力，填入阿里云 `LING_SHU_ALIYUN_API_KEY`、`ALIYUN_AK_ID`、`ALIYUN_AK_SECRET`、`LING_SHU_ALIYUN_NLS_APP_KEY`，并将 `LING_SHU_ASR_ENABLED` / `LING_SHU_TTS_ENABLED` 设为 `true`。
 
-4. 启动：
+4. Python exec 默认启用，用于对 SQL 查询结果做无状态结构化分析和图表建议。它只接收后端传入的已审核查询结果副本，不连接业务数据库，也不保存会话状态。若要关闭增强分析，可设置 `LING_SHU_EXEC_ENABLED=false`；默认 `LING_SHU_EXEC_FAIL_OPEN=true`，exec 不可用时主问数链路会退回原始 SQL 结果。
+
+5. 启动：
 
 ```bash
 docker compose --env-file .env up -d --build
 ```
 
-5. 访问：
+6. 访问：
 
 - 前端控制台：`http://localhost:${LING_SHU_WEB_PORT:-80}`
 - 后端 API：`http://localhost:${LING_SHU_API_PORT:-8080}/api/v1`
@@ -47,6 +49,7 @@ docker compose --env-file .env up -d --build
 - 已存在数据库升级时，需要按编号顺序执行增量脚本，例如本次第三方内嵌能力需要导入 `scripts/mysql/007_embed_apps.sql`，它会同时补齐加密保存 `App Secret` 的字段。
 - 部署后可在项目管理的“内嵌”列表点击“集成测试”，控制台会用接近全屏的模拟第三方页面加载正式 JS SDK，便于验证悬浮机器人、弹窗、会话策略和 ASR/TTS。
 - 需要模拟真实三方系统时，可运行 `examples/embed-third-party-demo`。Docker 默认可设置 `LINGSHU_WEB_BASE_URL=http://localhost:${LING_SHU_WEB_PORT:-80}`、`LINGSHU_API_BASE_URL=http://localhost:${LING_SHU_API_PORT:-8080}/api/v1`，并把 Demo 来源 `http://localhost:8099` 加入内嵌应用允许来源。
+- Python exec 日志会包含 `request_id`、租户、项目、会话、用户、结果集数量、输入/输出行数、模板和耗时，便于和 API 日志、审计日志串联排查。
 - 如使用外部 MySQL，可在 `.env` 设置 `LING_SHU_MYSQL_DSN` 覆盖默认连接。
 - 不需要 RAG / 向量召回时，可设置 `LING_SHU_MILVUS_ENABLED=false`，并按需停用 `etcd`、`minio`、`milvus` 服务。
 - 所有数据保存在命名卷中（`mysql_data`、`redis_data`、`milvus_data` 等），`docker compose down -v` 会清空数据。
@@ -69,14 +72,14 @@ docker compose down -v
 
 ## English
 
-These files bring up the full Ling-Shu stack on a single host with Docker Compose: the backend API, the frontend web, MySQL, Redis, and the full Milvus dependency set (etcd / minio / standalone).
+These files bring up the full Ling-Shu stack on a single host with Docker Compose: the backend API, the frontend web, the stateless Python exec result analysis service, MySQL, Redis, and the full Milvus dependency set (etcd / minio / standalone).
 
 > For a quick local check, use the root `docker-compose.yml` (no frontend, no Milvus). For a production-like / complete experience, use this directory.
 
 ### Contents
 
 - `docker-compose.yml`: full service orchestration; API and Web images are built from source.
-- `.env.example`: environment variable template for ports, secrets, and optional Aliyun config.
+- `.env.example`: environment variable template for ports, secrets, Python exec, RAG, and optional Aliyun config.
 
 ### Usage
 
@@ -94,13 +97,15 @@ cp .env.example .env
 
 3. For voice features, fill in the Aliyun values (`LING_SHU_ALIYUN_API_KEY`, `ALIYUN_AK_ID`, `ALIYUN_AK_SECRET`, `LING_SHU_ALIYUN_NLS_APP_KEY`) and set `LING_SHU_ASR_ENABLED` / `LING_SHU_TTS_ENABLED` to `true`.
 
-4. Start:
+4. Python exec is enabled by default for stateless structured analysis and chart suggestions over SQL result rows. It only receives reviewed result copies from the backend, does not connect to business databases, and stores no session state. Set `LING_SHU_EXEC_ENABLED=false` to disable it. With the default `LING_SHU_EXEC_FAIL_OPEN=true`, the main ChatBI flow falls back to raw SQL results if exec is unavailable.
+
+5. Start:
 
 ```bash
 docker compose --env-file .env up -d --build
 ```
 
-5. Access:
+6. Access:
 
 - Web console: `http://localhost:${LING_SHU_WEB_PORT:-80}`
 - Backend API: `http://localhost:${LING_SHU_API_PORT:-8080}/api/v1`
@@ -112,6 +117,7 @@ docker compose --env-file .env up -d --build
 - When upgrading an existing database, apply incremental scripts in numeric order. The third-party embedding feature requires `scripts/mysql/007_embed_apps.sql`, which also adds the encrypted `App Secret` column when needed.
 - After deployment, open **Embed > Integration Test** from project management. The console loads the real JS SDK inside a near full-screen simulated third-party page so you can verify the floating bot, modal, session policy, and ASR/TTS.
 - To simulate a real third-party system, run `examples/embed-third-party-demo`. With the Docker defaults, set `LINGSHU_WEB_BASE_URL=http://localhost:${LING_SHU_WEB_PORT:-80}` and `LINGSHU_API_BASE_URL=http://localhost:${LING_SHU_API_PORT:-8080}/api/v1`, then add the demo origin `http://localhost:8099` to the embed app's allowed origins.
+- Python exec logs include `request_id`, tenant, project, session, user, dataset counts, input/output rows, template, and duration so they can be correlated with API logs and audit records.
 - To use an external MySQL, set `LING_SHU_MYSQL_DSN` in `.env` to override the default connection.
 - If you do not need RAG / vector retrieval, set `LING_SHU_MILVUS_ENABLED=false` and stop the `etcd`, `minio`, and `milvus` services as needed.
 - All data is stored in named volumes (`mysql_data`, `redis_data`, `milvus_data`, ...). `docker compose down -v` wipes the data.

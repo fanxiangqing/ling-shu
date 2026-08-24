@@ -4,25 +4,26 @@
 
 ## 中文
 
-这一组清单用于在 Kubernetes 上部署 Ling-Shu API，并附带集群内置的 MySQL、Redis、Milvus（含 etcd / minio）依赖。所有资源默认部署在 `ling-shu` 命名空间。
+这一组清单用于在 Kubernetes 上部署 Ling-Shu API，并附带无状态 Python exec 结果分析服务、集群内置的 MySQL、Redis、Milvus（含 etcd / minio）依赖。所有资源默认部署在 `ling-shu` 命名空间。
 
 > 如果你已有托管的 MySQL / Redis / Milvus，可从 `kustomization.yaml` 移除对应的 `mysql.yaml` / `redis.yaml` / `milvus.yaml`，并把 `secret.yaml`、`configmap.yaml` 里的地址改为外部服务。
 
 ### 清单说明
 
 - `namespace.yaml`：命名空间。
-- `configmap.yaml`：非敏感配置（Redis / Milvus 地址、日志、限流等）。
+- `configmap.yaml`：非敏感配置（Redis / Milvus / Python exec 地址、日志、限流等）。
 - `secret.yaml`：DSN、JWT、加密密钥、MySQL / MinIO 凭据。
 - `mysql.yaml`：内置 MySQL 8.4 StatefulSet + Service + PVC。
 - `redis.yaml`：内置 Redis 7.4 StatefulSet + Service + PVC。
 - `milvus.yaml`：Milvus 单机栈（etcd + minio + milvus standalone）。
+- `exec.yaml`：无状态 Python exec Deployment + Service，只分析后端传入的已审核 SQL 结果副本。
 - `deployment.yaml` / `service.yaml` / `ingress.yaml`：API 部署、服务与入口。
 
 ### 使用方式
 
 1. 修改 `secret.yaml` 中的占位密钥：`LING_SHU_JWT_SECRET`、`LING_SHU_DSN_SECRET`、`MYSQL_ROOT_PASSWORD`，并确保 `LING_SHU_MYSQL_DSN` 中的密码与 `MYSQL_ROOT_PASSWORD` 一致。
 2. 如需语音能力，在 `secret.yaml` 填入阿里云密钥，并在 `configmap.yaml` 把 `LING_SHU_ASR_ENABLED` / `LING_SHU_TTS_ENABLED` 设为 `true`。
-3. 修改 `deployment.yaml` 中的镜像地址（默认 `ling-shu-api:latest`）。
+3. 修改 `deployment.yaml` 中的 API 镜像地址（默认 `ling-shu-api:latest`），并修改 `exec.yaml` 中的 Python exec 镜像地址（默认 `ling-shu-exec:latest`）。
 4. 修改 `ingress.yaml` 中的域名和 `ingressClassName`。
 5. 部署：
 
@@ -40,29 +41,32 @@ kubectl -n ling-shu exec -i statefulset/mysql -- \
 
 > 后续的增量脚本（`scripts/mysql/002_*.sql` 等）按需用同样方式导入。
 
+Python exec 默认通过 `configmap.yaml` 中的 `LING_SHU_EXEC_ENABLED=true` 启用，API 访问集群内服务 `exec:50051`。默认 `LING_SHU_EXEC_FAIL_OPEN=true`，exec 不可用时 readiness 会标记 `exec=degraded`，但不会阻断主问数链路；改为 `false` 后 readiness 会把 exec 当作硬依赖。
+
 SSE 问数和 Agent Loop 可能会持续较久，Ingress 默认设置了 600 秒代理读写超时。
 
 ## English
 
-These manifests deploy the Ling-Shu API on Kubernetes, together with in-cluster MySQL, Redis, and Milvus (etcd / minio included). All resources default to the `ling-shu` namespace.
+These manifests deploy the Ling-Shu API on Kubernetes, together with the stateless Python exec result analysis service, in-cluster MySQL, Redis, and Milvus (etcd / minio included). All resources default to the `ling-shu` namespace.
 
 > If you already run managed MySQL / Redis / Milvus, remove `mysql.yaml` / `redis.yaml` / `milvus.yaml` from `kustomization.yaml` and point the addresses in `secret.yaml` and `configmap.yaml` to your external services.
 
 ### Manifests
 
 - `namespace.yaml`: namespace.
-- `configmap.yaml`: non-sensitive config (Redis / Milvus addresses, logging, rate limiting).
+- `configmap.yaml`: non-sensitive config (Redis / Milvus / Python exec addresses, logging, rate limiting).
 - `secret.yaml`: DSN, JWT, encryption secret, MySQL / MinIO credentials.
 - `mysql.yaml`: in-cluster MySQL 8.4 StatefulSet + Service + PVC.
 - `redis.yaml`: in-cluster Redis 7.4 StatefulSet + Service + PVC.
 - `milvus.yaml`: Milvus standalone stack (etcd + minio + milvus standalone).
+- `exec.yaml`: stateless Python exec Deployment + Service; it only analyzes reviewed SQL result copies sent by the backend.
 - `deployment.yaml` / `service.yaml` / `ingress.yaml`: API Deployment, Service, and Ingress.
 
 ### Usage
 
 1. Edit the placeholder secrets in `secret.yaml`: `LING_SHU_JWT_SECRET`, `LING_SHU_DSN_SECRET`, `MYSQL_ROOT_PASSWORD`, and make sure the password in `LING_SHU_MYSQL_DSN` matches `MYSQL_ROOT_PASSWORD`.
 2. For voice features, fill the Aliyun secrets in `secret.yaml` and set `LING_SHU_ASR_ENABLED` / `LING_SHU_TTS_ENABLED` to `true` in `configmap.yaml`.
-3. Update the image in `deployment.yaml` (defaults to `ling-shu-api:latest`).
+3. Update the API image in `deployment.yaml` (defaults to `ling-shu-api:latest`) and the Python exec image in `exec.yaml` (defaults to `ling-shu-exec:latest`).
 4. Update the host and `ingressClassName` in `ingress.yaml`.
 5. Deploy:
 
@@ -79,5 +83,7 @@ kubectl -n ling-shu exec -i statefulset/mysql -- \
 ```
 
 > Apply later incremental scripts (`scripts/mysql/002_*.sql`, etc.) the same way when needed.
+
+Python exec is enabled by default through `LING_SHU_EXEC_ENABLED=true` in `configmap.yaml`, and the API calls the in-cluster service at `exec:50051`. With the default `LING_SHU_EXEC_FAIL_OPEN=true`, readiness reports `exec=degraded` when exec is unavailable but the main ChatBI flow still falls back to raw SQL results. Set it to `false` if exec should be a hard readiness dependency.
 
 Agent question answering uses long-lived SSE connections, so the Ingress sets a 600s proxy read/write timeout by default.

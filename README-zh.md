@@ -47,6 +47,7 @@ Ling-Shu 是一个企业级 ChatBI / Text2SQL / VoiceBI 平台。用户可以用
 ## 技术栈
 
 - 后端：Go、Gin、GORM、Zap
+- 结果分析沙箱：Python、gRPC、pandas、numpy
 - 前端：Vue 3、TypeScript、Vite、Naive UI
 - 数据库：MySQL 8
 - 缓存：Redis
@@ -72,6 +73,8 @@ flowchart LR
   Agent --> Review["SQL 安全审核"]
   Review --> Executor["只读查询执行器"]
   Executor --> Sources[("项目数据源")]
+  Executor --> PyExec["无状态 Python exec 结果分析"]
+  PyExec --> Agent
 
   Knowledge --> RAG["RAG 召回与索引"]
   RAG --> Milvus[("Milvus 向量库")]
@@ -90,6 +93,7 @@ flowchart LR
 - **控制面**：租户、用户、项目、数据源绑定、Provider 配置、权限和审计记录保存在 MySQL。
 - **知识面**：业务术语、指标口径、FewShot SQL 和文档切片向量化后进入 Milvus，用于项目级 RAG 召回。
 - **执行面**：Agent 只能对当前项目绑定的数据源执行通过审核的只读 SQL。
+- **分析面**：Python exec 是无状态 gRPC 服务，只接收 Go 传入的已审核查询结果副本，用 pandas/numpy 做结构化摘要、指标和图表建议，不连接业务库、不保存会话状态。
 
 ## 数据源支持
 
@@ -110,6 +114,7 @@ flowchart LR
 cmd/server/        服务启动入口
 configs/           配置示例
 docs/              架构与设计文档
+exec/              无状态 Python 结果集分析 gRPC 服务
 frontend/          Vue 3 前端
 internal/          业务模块
   aliyun/          阿里云 SDK 集成（如 NLS）
@@ -136,6 +141,7 @@ pkg/               公共包
   response/        统一响应封装
   secret/          密钥加解密
 prompts/           Prompt 模板
+shared/proto/      跨语言 gRPC 协议
 scripts/mysql/     MySQL 初始化脚本
 deploy/            部署配置
   docker/          Docker Compose 全栈部署
@@ -164,6 +170,18 @@ export LING_SHU_ALIYUN_NLS_APP_KEY="your-nls-app-key"
 ```
 
 ASR 和 TTS 是可选能力。TTS 未启用时，语音问数仍会返回转写文本和 ChatBI 结果，只是不生成播报音频。
+
+Python exec 是可选增强能力。默认配置关闭；启用后，Go 会把 SQL 执行器返回的结果集副本发送到 `exec` gRPC 服务做无状态分析，并通过 `request_id`、租户、项目、会话和用户字段贯穿 API 日志、Python 日志和审计记录。
+
+```bash
+export LING_SHU_EXEC_ENABLED=true
+export LING_SHU_EXEC_GRPC_ADDR=127.0.0.1:50051
+export LING_SHU_EXEC_FAIL_OPEN=true
+```
+
+`LING_SHU_EXEC_FAIL_OPEN=true` 表示 Python exec 不可用时保留原始 SQL 结果继续回答；设为 `false` 后 readiness 会把 exec 当作硬依赖。
+
+exec 启用后会在内部自动选择合适的 Python 分析策略，对最终用户不可见，也不作为用户选项暴露。结果综合 prompt 会按运行状态切换：`disabled` 时只观察 SQL 原始结果，`available` 时可使用 Python 增强后的表格/指标/图表建议，`unavailable` 时按无增强结果回答并避免把内部故障暴露给最终用户。更多本地调试、配置和日志字段见 [exec/README.md](/Users/fanxiangqing/Developer/golang/ling-shu/exec/README.md)。
 
 ## 第三方系统内嵌
 
@@ -409,11 +427,15 @@ POST /api/v1/embed/server/sessions/:session_id/messages/stream
 
 ### Docker Compose
 
+完整本地栈位于 [deploy/docker](/Users/fanxiangqing/Developer/golang/ling-shu/deploy/docker)：
+
 ```bash
-docker compose up --build
+cd deploy/docker
+cp .env.example .env
+docker compose --env-file .env up -d --build
 ```
 
-默认会启动 API、MySQL 和 Redis。MySQL 首次启动会执行：
+默认会启动 API、Web、无状态 Python exec、MySQL、Redis 和 Milvus。MySQL 首次启动会执行：
 
 ```text
 scripts/mysql/001_init_schema.sql
@@ -421,7 +443,7 @@ scripts/mysql/001_init_schema.sql
 
 该初始化脚本已包含第三方内嵌所需的 `embed_apps` 和 `embed_sessions` 表。已有数据库升级时按编号执行增量脚本，本次内嵌能力需要执行 `scripts/mysql/007_embed_apps.sql`，它会同时补齐加密保存 `App Secret` 的字段。
 
-Milvus 单独启动：
+如果只想单独启动 Milvus：
 
 ```bash
 docker compose -f docker-compose-milvus.yml up -d
@@ -439,6 +461,28 @@ go run ./cmd/server -config configs/config.yaml
 ```text
 http://localhost:8080
 ```
+
+### Python Exec
+
+本地调试 Python exec 使用虚拟环境：
+
+```bash
+cd exec
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+EXEC_GRPC_LISTEN=127.0.0.1:50051 .venv/bin/python server.py
+```
+
+然后在另一个终端启动 Go 后端，并设置：
+
+```bash
+export LING_SHU_EXEC_ENABLED=true
+export LING_SHU_EXEC_GRPC_ADDR=127.0.0.1:50051
+```
+
+exec 服务不持有会话、不落盘业务数据、不直接访问数据源；每次请求都从输入结果集开始，在子进程中完成分析，结束后清理临时目录。
+
+更多配置和追踪日志字段见 [exec/README.md](/Users/fanxiangqing/Developer/golang/ling-shu/exec/README.md)。
 
 ### 前端
 
@@ -473,6 +517,7 @@ sequenceDiagram
   participant Agent as ReAct Agent
   participant SQL as SQL 审核器
   participant DB as 业务数据源
+  participant PyExec as Python exec
   participant LLM as 结果综合 LLM
   participant Audit as 审计日志
 
@@ -486,6 +531,8 @@ sequenceDiagram
   SQL-->>Agent: 返回通过后的 SQL 或拒绝原因
   Chat->>DB: 执行审核通过的只读查询
   DB-->>Chat: 返回数据行、执行统计和图表建议
+  Chat->>PyExec: 发送结果集副本和 trace metadata
+  PyExec-->>Chat: 返回无状态分析表、指标和图表建议
   Chat->>LLM: 观察执行结果并生成最终答案
   LLM-->>Chat: 返回面向业务用户的结论或兜底信号
   opt LLM 结果综合不可用
@@ -500,6 +547,7 @@ sequenceDiagram
 - **元数据优先**：Text2SQL Prompt 会注入已同步的库表、字段、注释、索引、主外键和项目绑定关系。
 - **业务语言优先**：RAG 会注入术语和指标口径，让用户可以直接说“GMV”“活跃用户”“新增客户”等业务词。
 - **先审核再执行**：SQL 执行前必须经过安全审核，写入语句、DDL、多语句和高风险模式会被拦截。
+- **Python 沙箱保持无状态**：Go 负责权限、SQL 审核、审计和会话状态；Python 只分析本次请求传入的结果集副本，日志贯穿 `request_id`、租户、项目、会话和用户字段。
 - **迭代式 ReAct 循环**：Agent 会重复 Thought -> Action -> Observation，直到拥有足够可信的数据或需要用户澄清。
 - **边界保持轻量**：普通 CRUD 走清晰的 `handler -> service -> repository -> model` 链路，高变化的 AI、RAG、Provider、数据源插件独立封装。
 - **工具后继续观察**：SQL 执行完成后会把返回行交给结果综合链路，让最终答案基于工具观察结果生成；本地摘要只作为兜底。
