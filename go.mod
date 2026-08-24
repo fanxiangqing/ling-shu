@@ -14,6 +14,8 @@ require (
 	github.com/sijms/go-ora/v2 v2.7.17
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.38.0
+	google.golang.org/grpc v1.48.0
+	google.golang.org/protobuf v1.34.1
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.5.7
 	gorm.io/gorm v1.25.12
@@ -77,6 +79,4 @@ require (
 	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/text v0.25.0 // indirect
 	google.golang.org/genproto v0.0.0-20220503193339-ba3ae3f07e29 // indirect
-	google.golang.org/grpc v1.48.0 // indirect
-	google.golang.org/protobuf v1.34.1 // indirect
 )

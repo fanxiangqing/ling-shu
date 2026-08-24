@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package ling_shu.exec.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "ling-shu/internal/pyexecclient/pb;pb";
+
+// ResultAnalysisService 是无状态 Python 结果集分析服务。
+//
+// 固定边界：
+// - 不打开会话，不保存命名空间，不持有跨轮状态。
+// - 不接收 DSN、业务库凭据或 Provider 密钥。
+// - 只分析 Go 侧已经审核、限行并执行完成的结果集副本。
+service ResultAnalysisService {
+  rpc AnalyzeResultSets(AnalyzeResultSetsRequest) returns (AnalyzeResultSetsResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+message AnalyzeResultSetsRequest {
+  string request_id = 1;
+  uint64 tenant_id = 2;
+  uint64 project_id = 3;
+  uint64 session_id = 4;
+  uint64 user_id = 5;
+  string question = 6;
+  string mode = 7;          // auto | template | code
+  string analysis_goal = 8; // 自动分析目标，或 code 模式的一次性 Python 代码
+  repeated AnalysisDataset datasets = 9;
+  AnalysisLimits limits = 10;
+  string template_name = 11; // template 模式使用，例如 trend_analysis/category_analysis
+  google.protobuf.Struct template_params = 12; // template/code 模式的结构化参数
+}
+
+message AnalysisDataset {
+  string name = 1;
+  uint64 datasource_id = 2;
+  string datasource_name = 3;
+  string purpose = 4;
+  uint64 execution_id = 5;
+  repeated string columns = 6;
+  repeated google.protobuf.Struct rows = 7;
+}
+
+message AnalysisLimits {
+  int32 timeout_ms = 1;
+  int32 max_input_rows = 2;
+  int32 max_output_rows = 3;
+  int32 max_stdout_chars = 4;
+}
+
+message AnalyzeResultSetsResponse {
+  bool success = 1;
+  string summary = 2;
+  string observation = 3;
+  repeated AnalysisTable tables = 4;
+  repeated AnalysisChart charts = 5;
+  repeated AnalysisMetric metrics = 6;
+  repeated string warnings = 7;
+  string stdout_preview = 8;
+  string stderr_preview = 9;
+  string error = 10;
+  int64 duration_ms = 11;
+  int32 input_row_count = 12;
+  int32 output_row_count = 13;
+  string analysis_kind = 14;
+  string code_hash = 15;
+  string template_name = 16;
+}
+
+message AnalysisTable {
+  string name = 1;
+  repeated string columns = 2;
+  repeated google.protobuf.Struct rows = 3;
+}
+
+message AnalysisChart {
+  string type = 1;
+  string title = 2;
+  string x_field = 3;
+  repeated string y_fields = 4;
+  string name_field = 5;
+  string value_field = 6;
+  string reason = 7;
+  repeated google.protobuf.Struct rows = 8;
+}
+
+message AnalysisMetric {
+  string name = 1;
+  string label = 2;
+  double value = 3;
+  string unit = 4;
+  string display = 5;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool ok = 1;
+  string version = 2;
+  map<string, bool> capabilities = 3;
+}

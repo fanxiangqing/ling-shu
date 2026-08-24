@@ -3,6 +3,10 @@
 .idea/
 frontend/node_modules/
 frontend/dist/
+exec/.venv/
+.pytest_cache/
+__pycache__/
+*.py[cod]
 logs/
 docs/architecture-clean-lite.md
 

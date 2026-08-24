@@ -1,0 +1,5 @@
+grpcio==1.82.1
+protobuf==6.33.2
+pandas==2.3.3
+numpy==2.3.5
+pytest==9.0.2
