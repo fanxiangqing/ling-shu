@@ -106,7 +106,7 @@ export async function sendEmbedMessageStream(sessionId: number, payload: EmbedSt
           reader = null
           return finalResult
         }
-        if (event.name === 'error') {
+        if (event.name === 'error' && !isAgentEventPayload(event.data)) {
           throw new Error(streamEventMessage(event.data))
         }
         onStep(event.data as AgentEvent)
@@ -121,7 +121,7 @@ export async function sendEmbedMessageStream(sessionId: number, payload: EmbedSt
         reader = null
         return finalResult
       }
-      if (event?.name === 'error') {
+      if (event?.name === 'error' && !isAgentEventPayload(event.data)) {
         throw new Error(streamEventMessage(event.data))
       }
       if (event) onStep(event.data as AgentEvent)
@@ -209,6 +209,12 @@ function streamEventMessage(data: unknown) {
     return friendlyErrorMessage(String((data as { message?: string }).message || 'stream failed'))
   }
   return friendlyErrorMessage('stream failed')
+}
+
+function isAgentEventPayload(data: unknown): data is AgentEvent {
+  if (!data || typeof data !== 'object') return false
+  const event = data as Partial<AgentEvent>
+  return typeof event.type === 'string' && typeof event.step === 'number'
 }
 
 async function streamResponseError(response: Response) {

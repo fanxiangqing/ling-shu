@@ -70,7 +70,7 @@ export async function sendChatMessageStream(
             await closeStreamReader(reader)
             reader = null
             return finalResult
-          } else if (event.name === 'error') {
+          } else if (event.name === 'error' && !isAgentEventPayload(event.data)) {
             throw new Error(streamEventMessage(event.data))
           } else {
             onStep(event.data as AgentEvent)
@@ -87,7 +87,7 @@ export async function sendChatMessageStream(
         reader = null
         return finalResult
       }
-      if (event?.name === 'error') {
+      if (event?.name === 'error' && !isAgentEventPayload(event.data)) {
         throw new Error(streamEventMessage(event.data))
       }
       if (event) {
@@ -297,6 +297,12 @@ function streamEventMessage(data: unknown) {
     return friendlyErrorMessage(String((data as { message?: string }).message || 'stream failed'))
   }
   return friendlyErrorMessage('stream failed')
+}
+
+function isAgentEventPayload(data: unknown): data is AgentEvent {
+  if (!data || typeof data !== 'object') return false
+  const event = data as Partial<AgentEvent>
+  return typeof event.type === 'string' && typeof event.step === 'number'
 }
 
 async function closeStreamReader(reader: ReadableStreamDefaultReader<Uint8Array>) {
