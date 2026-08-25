@@ -1,3 +1,5 @@
+
+
 # Ling-Shu
 
 [中文文档](README-zh.md)
@@ -427,7 +429,7 @@ If the project has ASR/TTS configured, `/embed/bootstrap` returns capability fla
 
 ### Docker Compose
 
-The full local stack lives in [deploy/docker](/Users/fanxiangqing/Developer/golang/ling-shu/deploy/docker):
+The full local stack lives in [deploy/docker](deploy/docker):
 
 ```bash
 cd deploy/docker
