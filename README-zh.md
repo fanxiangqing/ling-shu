@@ -93,7 +93,7 @@ flowchart LR
 - **控制面**：租户、用户、项目、数据源绑定、Provider 配置、权限和审计记录保存在 MySQL。
 - **知识面**：业务术语、指标口径、FewShot SQL 和文档切片向量化后进入 Milvus，用于项目级 RAG 召回。
 - **执行面**：Agent 只能对当前项目绑定的数据源执行通过审核的只读 SQL。
-- **分析面**：Python exec 是无状态 gRPC 服务，只接收 Go 传入的已审核查询结果副本，用 pandas/numpy 做结构化摘要、指标和图表建议，不连接业务库、不保存会话状态。
+- **分析面**：Python exec 是无状态 gRPC 服务，只接收 Go 传入的已审核查询结果副本，用 pandas/numpy 做结构化摘要、指标和图表展示元数据，不连接业务库、不保存会话状态。
 
 ## 数据源支持
 
@@ -181,7 +181,7 @@ export LING_SHU_EXEC_FAIL_OPEN=true
 
 `LING_SHU_EXEC_FAIL_OPEN=true` 表示 Python exec 不可用时保留原始 SQL 结果继续回答；设为 `false` 后 readiness 会把 exec 当作硬依赖。
 
-exec 启用后会在内部自动选择合适的 Python 分析策略，对最终用户不可见，也不作为用户选项暴露。结果综合 prompt 会按运行状态切换：`disabled` 时只观察 SQL 原始结果，`available` 时可使用 Python 增强后的表格/指标/图表建议，`unavailable` 时按无增强结果回答并避免把内部故障暴露给最终用户。更多本地调试、配置和日志字段见 [exec/README.md](/Users/fanxiangqing/Developer/golang/ling-shu/exec/README.md)。
+exec 启用后会在内部自动选择合适的 Python 分析策略。结果综合 prompt 会按运行状态切换：`disabled` 时只观察 SQL 原始结果，`available` 时可使用 Python 增强后的表格、指标和图表展示元数据，`unavailable` 时按无增强结果回答并避免把内部故障暴露给最终用户。更多本地调试、配置和日志字段见 [exec/README-zh.md](/Users/fanxiangqing/Developer/golang/ling-shu/exec/README-zh.md)。
 
 ## 第三方系统内嵌
 
@@ -482,7 +482,7 @@ export LING_SHU_EXEC_GRPC_ADDR=127.0.0.1:50051
 
 exec 服务不持有会话、不落盘业务数据、不直接访问数据源；每次请求都从输入结果集开始，在子进程中完成分析，结束后清理临时目录。
 
-更多配置和追踪日志字段见 [exec/README.md](/Users/fanxiangqing/Developer/golang/ling-shu/exec/README.md)。
+更多配置和追踪日志字段见 [exec/README-zh.md](/Users/fanxiangqing/Developer/golang/ling-shu/exec/README-zh.md)。
 
 ### 前端
 
@@ -530,9 +530,9 @@ sequenceDiagram
   Agent->>SQL: 提交生成的 SQL 做安全审核
   SQL-->>Agent: 返回通过后的 SQL 或拒绝原因
   Chat->>DB: 执行审核通过的只读查询
-  DB-->>Chat: 返回数据行、执行统计和图表建议
+  DB-->>Chat: 返回数据行、执行统计和图表展示元数据
   Chat->>PyExec: 发送结果集副本和 trace metadata
-  PyExec-->>Chat: 返回无状态分析表、指标和图表建议
+  PyExec-->>Chat: 返回无状态分析表、指标和图表展示元数据
   Chat->>LLM: 观察执行结果并生成最终答案
   LLM-->>Chat: 返回面向业务用户的结论或兜底信号
   opt LLM 结果综合不可用

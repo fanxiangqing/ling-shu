@@ -1,8 +1,10 @@
 # Ling-Shu Python Exec
 
-`exec` 是无状态 Python 结果集分析服务。Go 后端仍负责权限、SQL 审核、业务数据源连接、审计和会话状态；Python 只接收本次请求传入的已审核 SQL 结果副本，返回摘要表、指标和图表建议。
+[Chinese](README-zh.md)
 
-## 本地调试
+`exec` is the stateless Python result-set analysis service for Ling-Shu. The Go backend still owns authorization, SQL review, business data source connections, audit logging, and session state. Python only receives reviewed SQL result copies for the current request and returns summary tables, metrics, and chart rendering metadata.
+
+## Local Debugging
 
 ```bash
 cd exec
@@ -11,40 +13,40 @@ python3 -m venv .venv
 EXEC_GRPC_LISTEN=127.0.0.1:50051 .venv/bin/python server.py
 ```
 
-Go 后端启用：
+Enable it in the Go backend:
 
 ```bash
 export LING_SHU_EXEC_ENABLED=true
 export LING_SHU_EXEC_GRPC_ADDR=127.0.0.1:50051
 ```
 
-## 配置
+## Configuration
 
-- `EXEC_GRPC_LISTEN`：gRPC 监听地址，默认 `127.0.0.1:50051`。
-- `EXEC_TIMEOUT_MS`：单次分析超时，默认 `10000`。
-- `EXEC_MAX_INPUT_ROWS`：最大输入行数，默认 `5000`。
-- `EXEC_MAX_OUTPUT_ROWS`：最大输出行数，默认 `1000`。
-- `EXEC_MAX_STDOUT_CHARS`：stdout/stderr 预览截断长度，默认 `10000`。
-- `EXEC_MEMORY_LIMIT_MB`：worker 子进程内存限制，默认 `512`。
-- `EXEC_LOG_LEVEL`：日志级别，默认 `info`。
+- `EXEC_GRPC_LISTEN`: gRPC listen address. Default: `127.0.0.1:50051`.
+- `EXEC_TIMEOUT_MS`: per-request analysis timeout in milliseconds. Default: `10000`.
+- `EXEC_MAX_INPUT_ROWS`: maximum input rows accepted per request. Default: `5000`.
+- `EXEC_MAX_OUTPUT_ROWS`: maximum output rows returned per table. Default: `1000`.
+- `EXEC_MAX_STDOUT_CHARS`: stdout/stderr preview truncation limit. Default: `10000`.
+- `EXEC_MEMORY_LIMIT_MB`: memory limit for the worker child process. Default: `512`.
+- `EXEC_LOG_LEVEL`: log level. Default: `info`.
 
-## 内部分析策略
+## Internal Analysis Strategies
 
-exec 的服务启停由 Go 侧 `LING_SHU_EXEC_ENABLED` 控制；启用后内部同时支持 `auto`、`template`、`code` 三种请求策略，不需要也不支持通过环境变量切换单个策略。这些策略由 Go 服务和后续编排逻辑选择，对最终用户不可见，也不作为前端/外部 API 的用户选项暴露。
+The service is enabled or disabled by Go through `LING_SHU_EXEC_ENABLED`. When enabled, the internal request path supports `auto`, `template`, and `code` strategies.
 
-- `auto`：Python 根据结果集字段、数据类型和 question 自动选择内置模板，适合默认问数增强。
-- `template`：Go 指定 `template_name` 和 `template_params`，适合明确要求趋势、分类、描述统计等固定分析。
-- `code`：执行本次请求携带的一次性 Python 代码，代码来自 `analysis_goal` 或 `template_params.code`，仍在子进程、超时、内存限制和临时目录清理约束内运行。代码上下文包含 `pd`、首个结果集 `df`、按顺序排列的 `frames`、`dataset_names`、按名称索引的 `datasets`，最终结果需要赋给 `result`。
+- `auto`: Python chooses a built-in template from the result-set fields, data types, and question. This is the default enhancement path for general data questions.
+- `template`: Go provides `template_name` and `template_params`. This is useful when the orchestration layer already knows it needs a trend, category, descriptive-statistics, or multi-dataset analysis.
+- `code`: executes one-off Python code carried by the current request. The code comes from `analysis_goal` or `template_params.code`, and still runs inside the child process with timeout, memory limit, and temporary-directory cleanup constraints. The code context includes `pd`, first result set `df`, ordered `frames`, `dataset_names`, and name-indexed `datasets`. The final value must be assigned to `result`.
 
-常用模板名：
+Common template names:
 
-- `trend_analysis`：需要 `time_field`/`x_field` 和 `value_field`/`y_field`。
-- `category_analysis`：需要 `category_field`/`name_field`/`x_field` 和 `value_field`/`y_field`。
-- `descriptive_stats`：对数值字段做统计摘要。
-- `multi_dataset_overview`：对多个结果集做概览。
+- `trend_analysis`: requires `time_field`/`x_field` and `value_field`/`y_field`.
+- `category_analysis`: requires `category_field`/`name_field`/`x_field` and `value_field`/`y_field`.
+- `descriptive_stats`: builds statistical summaries for numeric fields.
+- `multi_dataset_overview`: summarizes multiple result sets.
 
-## 追踪与日志
+## Trace And Logging
 
-Go 侧通过 gRPC metadata 透传 `request-id`、`tenant-id`、`project-id`、`session-id`、`user-id`。Python server、sandbox 父进程、worker 子进程和 analyzer 都会带这些字段输出日志，并记录结果集数量、输入/输出行数、模式、模板、耗时、超时和错误类型。
+Go propagates `request-id`, `tenant-id`, `project-id`, `session-id`, and `user-id` through gRPC metadata. The Python server, sandbox parent process, worker child process, and analyzer include these fields in logs, along with dataset count, input/output rows, mode, template, duration, timeout state, and error type.
 
-服务不保存会话状态，不连接业务数据库，也不把结果集明细写入日志。
+The service stores no session state, does not connect to business databases, and does not write detailed result rows to logs.

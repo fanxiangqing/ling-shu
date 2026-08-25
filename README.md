@@ -93,7 +93,7 @@ The runtime has three clear boundaries:
 - **Control plane**: tenants, users, projects, data source bindings, provider configs, permissions, and audit logs live in MySQL.
 - **Knowledge plane**: business terms, metric definitions, FewShot SQL, and document chunks are embedded and retrieved from Milvus.
 - **Execution plane**: the agent only executes reviewed read-only SQL against project-bound data sources.
-- **Analysis plane**: Python exec is a stateless gRPC service. It only receives reviewed query result copies from Go, uses pandas/numpy for structured summaries, metrics, and chart suggestions, and does not connect to business databases or store session state.
+- **Analysis plane**: Python exec is a stateless gRPC service. It only receives reviewed query result copies from Go, uses pandas/numpy for structured summaries, metrics, and chart rendering metadata, and does not connect to business databases or store session state.
 
 ## Supported Data Sources
 
@@ -181,7 +181,7 @@ export LING_SHU_EXEC_FAIL_OPEN=true
 
 With `LING_SHU_EXEC_FAIL_OPEN=true`, the ChatBI flow keeps the raw SQL result if Python exec is unavailable. Set it to `false` to make exec a hard readiness dependency.
 
-When exec is enabled, Go internally chooses the right Python analysis strategy. This capability is not exposed as an end-user option. The result synthesis prompt switches by runtime status: `disabled` only observes raw SQL results, `available` may use Python-enhanced tables/metrics/chart suggestions, and `unavailable` falls back to raw results without exposing internal exec failures to end users. See [exec/README.md](/Users/fanxiangqing/Developer/golang/ling-shu/exec/README.md) for local debugging, configuration, and trace fields.
+When exec is enabled, Go internally chooses the right Python analysis strategy. The result synthesis prompt switches by runtime status: `disabled` only observes raw SQL results, `available` may use Python-enhanced tables, metrics, and chart rendering metadata, and `unavailable` falls back to raw results without exposing internal exec failures to end users. See [exec/README.md](/Users/fanxiangqing/Developer/golang/ling-shu/exec/README.md) for local debugging, configuration, and trace fields.
 
 ## Third-Party Embedding
 
@@ -520,9 +520,9 @@ sequenceDiagram
   Agent->>SQL: Submit generated SQL for review
   SQL-->>Agent: Approved SQL or rejection reason
   Chat->>DB: Execute approved read-only query
-  DB-->>Chat: Rows, execution stats, chart suggestion
+  DB-->>Chat: Rows, execution stats, and chart rendering metadata
   Chat->>PyExec: Send result copies and trace metadata
-  PyExec-->>Chat: Stateless analysis tables, metrics, and chart suggestions
+  PyExec-->>Chat: Stateless analysis tables, metrics, and chart rendering metadata
   Chat->>LLM: Observe execution results and synthesize the final answer
   LLM-->>Chat: Business-facing answer or fallback signal
   opt LLM synthesis unavailable

@@ -29,7 +29,7 @@ cp .env.example .env
 
 3. 如需语音能力，填入阿里云 `LING_SHU_ALIYUN_API_KEY`、`ALIYUN_AK_ID`、`ALIYUN_AK_SECRET`、`LING_SHU_ALIYUN_NLS_APP_KEY`，并将 `LING_SHU_ASR_ENABLED` / `LING_SHU_TTS_ENABLED` 设为 `true`。
 
-4. Python exec 默认启用，用于对 SQL 查询结果做无状态结构化分析和图表建议。它只接收后端传入的已审核查询结果副本，不连接业务数据库，也不保存会话状态。若要关闭增强分析，可设置 `LING_SHU_EXEC_ENABLED=false`；默认 `LING_SHU_EXEC_FAIL_OPEN=true`，exec 不可用时主问数链路会退回原始 SQL 结果。
+4. Python exec 默认启用，用于对 SQL 查询结果做无状态结构化分析，并返回图表展示元数据。它只接收后端传入的已审核查询结果副本，不连接业务数据库，也不保存会话状态。若要关闭增强分析，可设置 `LING_SHU_EXEC_ENABLED=false`；默认 `LING_SHU_EXEC_FAIL_OPEN=true`，exec 不可用时主问数链路会退回原始 SQL 结果。
 
 5. 启动：
 
@@ -97,7 +97,7 @@ cp .env.example .env
 
 3. For voice features, fill in the Aliyun values (`LING_SHU_ALIYUN_API_KEY`, `ALIYUN_AK_ID`, `ALIYUN_AK_SECRET`, `LING_SHU_ALIYUN_NLS_APP_KEY`) and set `LING_SHU_ASR_ENABLED` / `LING_SHU_TTS_ENABLED` to `true`.
 
-4. Python exec is enabled by default for stateless structured analysis and chart suggestions over SQL result rows. It only receives reviewed result copies from the backend, does not connect to business databases, and stores no session state. Set `LING_SHU_EXEC_ENABLED=false` to disable it. With the default `LING_SHU_EXEC_FAIL_OPEN=true`, the main ChatBI flow falls back to raw SQL results if exec is unavailable.
+4. Python exec is enabled by default for stateless structured analysis and chart rendering metadata over SQL result rows. It only receives reviewed result copies from the backend, does not connect to business databases, and stores no session state. Set `LING_SHU_EXEC_ENABLED=false` to disable it. With the default `LING_SHU_EXEC_FAIL_OPEN=true`, the main ChatBI flow falls back to raw SQL results if exec is unavailable.
 
 5. Start:
 
