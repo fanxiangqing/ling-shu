@@ -38,6 +38,7 @@ Ling-Shu 是一个企业级 ChatBI / Text2SQL / VoiceBI 平台。用户可以用
 - SQL 安全审核：仅允许 SELECT，禁止写入和 DDL，支持结果行数限制、超时控制和审计记录。
 - 元数据同步：Schema、Table、Column、Index、PrimaryKey、ForeignKey。
 - 业务知识 RAG：业务术语、指标口径、FewShot SQL。
+- 结构化会话记忆：保存当前焦点和查询结果产物，支持基于上一轮结果继续制作柱状图、折线图、饼图或表格，无需重复调用 LLM 和 SQL。
 - LLM / ASR / TTS Provider 化，目前重点适配阿里云。
 - VoiceBI：流式 ASR 输入和流式 TTS 播放。
 - 第三方系统内嵌：项目可创建 Embed App，第三方页面通过轻量 JS SDK 出现悬浮机器人，并在弹窗 iframe 中完成文本问数和项目级 ASR/TTS 语音交互。
@@ -65,6 +66,7 @@ flowchart LR
   Gate --> Service["应用服务层"]
 
   Service --> Agent["ReAct 问数 Agent"]
+  Service --> Memory["会话上下文与结果产物"]
   Service --> Knowledge["业务知识服务"]
   Service --> Metadata["元数据同步服务"]
   Service --> Voice["ASR / TTS 服务"]
@@ -80,7 +82,8 @@ flowchart LR
   RAG --> Milvus[("Milvus 向量库")]
 
   Metadata --> Sources
-  Repo --> MySQL[("MySQL 元数据库")]
+  Memory --> MySQL[("MySQL 元数据库")]
+  Repo --> MySQL
   Service --> Redis[("Redis 缓存")]
   Agent --> LLM["LLM Provider"]
   Voice --> Speech["ASR / TTS Provider"]
@@ -88,12 +91,23 @@ flowchart LR
   Speech --> AliyunNLS["阿里云 NLS"]
 ```
 
-运行时可以分成三个边界：
+运行时可以分成五个边界：
 
 - **控制面**：租户、用户、项目、数据源绑定、Provider 配置、权限和审计记录保存在 MySQL。
 - **知识面**：业务术语、指标口径、FewShot SQL 和文档切片向量化后进入 Milvus，用于项目级 RAG 召回。
+- **记忆面**：`internal/memory` 把会话焦点、结果集、维度、指标、单位和查询血缘保存为结构化产物；MySQL 是事实来源，聊天消息只用于兼容恢复和自然语言上下文。
 - **执行面**：Agent 只能对当前项目绑定的数据源执行通过审核的只读 SQL。
 - **分析面**：Python exec 是无状态 gRPC 服务，只接收 Go 传入的已审核查询结果副本，用 pandas/numpy 做结构化摘要、指标和图表展示元数据，不连接业务库、不保存会话状态。
+
+## 会话上下文与记忆
+
+Ling-Shu 不把“记忆”等同于把全部聊天历史重新发送给模型。每轮成功查询都会生成可追溯的结果产物，记录字段、行快照、图表配置、维度、指标单位、数据完整性、数据源和查询执行 ID。会话状态只保存当前有效产物和焦点产物，后续追问先由 `memory` 包解析，再决定复用结果还是进入 ReAct Agent。
+
+- “换成柱状图”“做个饼图”“用表格展示”等请求会优先复用最近的合适产物；命中后不会调用 RAG、LLM 或 SQL。
+- 明细结果没有数值指标时，只有确认结果完整才允许在本地按维度计数；被行数上限截断的数据不会冒充全量统计。
+- 指标带有单位语义，不同单位的标量不会被拼成同一张分布图；候选目标同等相关时会要求用户选择。
+- 读取和写入始终校验 `tenant_id`、`project_id`、`session_id` 和 `user_id`，避免跨租户、跨项目或跨用户召回。
+- 旧会话无需迁移消息内容；系统可以从已有 `agent_result` 消息提炼临时产物，并在后续成功轮次写入新的结构化状态。
 
 ## 数据源支持
 
@@ -128,6 +142,7 @@ internal/          业务模块
   datasource/      数据源插件与元数据同步
   handler/         HTTP 和实时接口
   llm/             LLM Provider
+  memory/          会话上下文、结果产物与追问解析
   middleware/      Gin 中间件
   model/           GORM Model
   query/           ReAct Agent 与 SQL 执行
@@ -441,7 +456,7 @@ docker compose --env-file .env up -d --build
 scripts/mysql/001_init_schema.sql
 ```
 
-该初始化脚本已包含第三方内嵌所需的 `embed_apps` 和 `embed_sessions` 表。已有数据库升级时按编号执行增量脚本，本次内嵌能力需要执行 `scripts/mysql/007_embed_apps.sql`，它会同时补齐加密保存 `App Secret` 的字段。
+该初始化脚本已包含第三方内嵌和会话记忆所需的表。已有数据库升级时请按编号执行增量脚本：第三方内嵌需要 `scripts/mysql/007_embed_apps.sql`，结构化会话上下文和结果产物需要 `scripts/mysql/008_chat_context_memory.sql`。
 
 如果只想单独启动 Milvus：
 
@@ -513,6 +528,7 @@ sequenceDiagram
   participant User as 用户
   participant Web as Web 管理台
   participant Chat as 对话服务
+  participant Memory as 会话记忆
   participant RAG as RAG 服务
   participant Agent as ReAct Agent
   participant SQL as SQL 审核器
@@ -523,21 +539,28 @@ sequenceDiagram
 
   User->>Web: 提出业务问题
   Web->>Chat: 发送文本或音频流
-  Chat->>RAG: 检索项目知识
-  RAG-->>Chat: 返回术语、指标、FewShot SQL、文档切片
-  Chat->>Agent: 组装任务上下文
-  Agent->>Agent: 路由数据源并读取元数据
-  Agent->>SQL: 提交生成的 SQL 做安全审核
-  SQL-->>Agent: 返回通过后的 SQL 或拒绝原因
-  Chat->>DB: 执行审核通过的只读查询
-  DB-->>Chat: 返回数据行、执行统计和图表展示元数据
-  Chat->>PyExec: 发送结果集副本和 trace metadata
-  PyExec-->>Chat: 返回无状态分析表、指标和图表展示元数据
-  Chat->>LLM: 观察执行结果并生成最终答案
-  LLM-->>Chat: 返回面向业务用户的结论或兜底信号
-  opt LLM 结果综合不可用
-    Chat->>Chat: 基于返回行生成本地答案摘要
+  Chat->>Memory: 加载会话状态、最近产物和精简历史
+  alt 可直接复用的图表追问
+    Memory-->>Chat: 返回转换后的数据集和图表元数据
+  else 新问题或无法安全复用
+    Memory-->>Chat: 返回结构化上下文
+    Chat->>RAG: 检索项目知识
+    RAG-->>Chat: 返回术语、指标、FewShot SQL、文档切片
+    Chat->>Agent: 组装任务上下文
+    Agent->>Agent: 路由数据源并读取元数据
+    Agent->>SQL: 提交生成的 SQL 做安全审核
+    SQL-->>Agent: 返回通过后的 SQL 或拒绝原因
+    Chat->>DB: 执行审核通过的只读查询
+    DB-->>Chat: 返回数据行、执行统计和图表展示元数据
+    Chat->>PyExec: 发送结果集副本和 trace metadata
+    PyExec-->>Chat: 返回无状态分析表、指标和图表展示元数据
+    Chat->>LLM: 观察执行结果并生成最终答案
+    LLM-->>Chat: 返回面向业务用户的结论或兜底信号
+    opt LLM 结果综合不可用
+      Chat->>Chat: 基于返回行生成本地答案摘要
+    end
   end
+  Chat->>Memory: 写入会话状态和可复用结果产物
   Chat->>Audit: 记录调用链路、SQL 审核和查询执行
   Chat-->>Web: 流式返回步骤、最终答案、结果数据和播报文本
 ```
@@ -547,6 +570,7 @@ sequenceDiagram
 - **元数据优先**：Text2SQL Prompt 会注入已同步的库表、字段、注释、索引、主外键和项目绑定关系。
 - **业务语言优先**：RAG 会注入术语和指标口径，让用户可以直接说“GMV”“活跃用户”“新增客户”等业务词。
 - **先审核再执行**：SQL 执行前必须经过安全审核，写入语句、DDL、多语句和高风险模式会被拦截。
+- **结果先复用**：图表类追问优先复用当前会话中完整且单位兼容的结果产物，无法安全复用时才回到 Agent 查询链路。
 - **Python 沙箱保持无状态**：Go 负责权限、SQL 审核、审计和会话状态；Python 只分析本次请求传入的结果集副本，日志贯穿 `request_id`、租户、项目、会话和用户字段。
 - **迭代式 ReAct 循环**：Agent 会重复 Thought -> Action -> Observation，直到拥有足够可信的数据或需要用户澄清。
 - **边界保持轻量**：普通 CRUD 走清晰的 `handler -> service -> repository -> model` 链路，高变化的 AI、RAG、Provider、数据源插件独立封装。

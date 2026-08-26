@@ -11,6 +11,7 @@ import (
 	"time"
 
 	auditpkg "ling-shu/internal/audit"
+	"ling-shu/internal/memory"
 	"ling-shu/internal/model"
 	"ling-shu/internal/query"
 	"ling-shu/internal/rag"
@@ -79,6 +80,7 @@ type ChatService struct {
 	resultAnalysisStatus string
 	resultAnalysisDetail string
 	ragRetriever         RAGRetriever
+	memoryManager        *memory.Manager
 	agentContextBuilder  AgentContextBuilder
 	auditRecorder        auditpkg.Recorder
 	logger               *zap.Logger
@@ -169,8 +171,16 @@ func NewChatService(chatRepo repository.ChatRepository, agentRunner AgentRunner,
 		resultAnalysisStatus: resultAnalysisStatusDisabled,
 		resultAnalysisDetail: "Python exec 未启用；结果综合只观察 SQL 原始执行结果。",
 		ragRetriever:         ragRetriever,
+		memoryManager:        memory.NewManager(nil),
 		logger:               zap.NewNop(),
 	}
+}
+
+func (s *ChatService) SetMemoryManager(manager *memory.Manager) {
+	if manager == nil {
+		manager = memory.NewManager(nil)
+	}
+	s.memoryManager = manager
 }
 
 func (s *ChatService) SetAuditRecorder(recorder auditpkg.Recorder) {
@@ -305,9 +315,6 @@ func (s *ChatService) sendMessage(ctx context.Context, input SendChatMessageInpu
 	if input.TenantID == 0 || input.ProjectID == 0 || input.SessionID == 0 || input.UserID == 0 || content == "" {
 		return nil, ErrInvalidInput
 	}
-	if s.agentRunner == nil {
-		return nil, ErrInvalidInput
-	}
 	logFields := chatLogFields(input, content, emit != nil)
 	s.logger.Info("chat message started", logFields...)
 	if err := s.ensureSessionScope(ctx, input.SessionID, input.TenantID, input.ProjectID, input.UserID); err != nil {
@@ -324,21 +331,47 @@ func (s *ChatService) sendMessage(ctx context.Context, input SendChatMessageInpu
 		)
 		return nil, err
 	}
-	conversation := buildConversation(recentMessages)
-	conversation = append(conversation, query.AgentMessage{Role: "user", Content: content})
-	businessTerms, metrics, fewShots, err := s.agentKnowledge(ctx, input)
-	if err != nil {
-		s.logger.Error("chat knowledge context load failed",
-			append(chatLogFields(input, content, emit != nil), zap.Error(err))...,
-		)
-		return nil, err
+	memoryScope := memory.Scope{
+		TenantID:  input.TenantID,
+		ProjectID: input.ProjectID,
+		SessionID: input.SessionID,
+		UserID:    input.UserID,
 	}
-	agentContext, err := s.buildAgentContext(ctx, input)
-	if err != nil {
-		s.logger.Error("chat agent context build failed",
-			append(chatLogFields(input, content, emit != nil), zap.Error(err))...,
+	preparedMemory, memoryErr := s.memoryManager.Prepare(ctx, memoryScope, recentMessages, content)
+	if memoryErr != nil {
+		s.logger.Warn("chat memory context load failed; using message history fallback",
+			append(chatLogFields(input, content, emit != nil), zap.Error(memoryErr))...,
 		)
-		return nil, err
+	}
+	conversation := preparedMemory.Conversation
+	if len(conversation) == 0 && len(recentMessages) > 0 {
+		conversation = buildConversation(recentMessages)
+	}
+	conversation = append(conversation, query.AgentMessage{Role: "user", Content: content})
+	var (
+		businessTerms []query.AgentKnowledge
+		metrics       []query.AgentKnowledge
+		fewShots      []query.AgentFewShot
+		agentContext  AgentContext
+	)
+	if !preparedMemory.Resolution.Handled() {
+		if s.agentRunner == nil {
+			return nil, ErrInvalidInput
+		}
+		businessTerms, metrics, fewShots, err = s.agentKnowledge(ctx, input)
+		if err != nil {
+			s.logger.Error("chat knowledge context load failed",
+				append(chatLogFields(input, content, emit != nil), zap.Error(err))...,
+			)
+			return nil, err
+		}
+		agentContext, err = s.buildAgentContext(ctx, input)
+		if err != nil {
+			s.logger.Error("chat agent context build failed",
+				append(chatLogFields(input, content, emit != nil), zap.Error(err))...,
+			)
+			return nil, err
+		}
 	}
 	s.logger.Info("chat context prepared",
 		append(chatLogFields(input, content, emit != nil),
@@ -369,7 +402,17 @@ func (s *ChatService) sendMessage(ctx context.Context, input SendChatMessageInpu
 		return nil, err
 	}
 
-	agentResult, execution, executions, loops, err := s.runAgentLoop(ctx, input, content, agentContext, businessTerms, metrics, fewShots, conversation, emit)
+	var (
+		agentResult *query.AgentResult
+		execution   *QueryExecutionResult
+		executions  []*QueryExecutionResult
+		loops       int
+	)
+	if preparedMemory.Resolution.Handled() {
+		agentResult, execution, err = s.resolveMemoryFollowUp(input, content, preparedMemory.Resolution, emit)
+	} else {
+		agentResult, execution, executions, loops, err = s.runAgentLoop(ctx, input, content, agentContext, businessTerms, metrics, fewShots, conversation, emit)
+	}
 	if err != nil {
 		s.logger.Error("chat agent loop failed",
 			append(chatLogFields(input, content, emit != nil),
@@ -410,6 +453,14 @@ func (s *ChatService) sendMessage(ctx context.Context, input SendChatMessageInpu
 			)...,
 		)
 		return nil, err
+	}
+	if err := s.memoryManager.RecordTurn(ctx, buildMemoryTurnInput(input, assistantMessage.ID, agentResult, execution, executions)); err != nil {
+		s.logger.Warn("chat memory turn persist failed",
+			append(chatLogFields(input, content, emit != nil),
+				zap.Uint64("assistant_message_id", assistantMessage.ID),
+				zap.Error(err),
+			)...,
+		)
 	}
 	s.recordChatAudit(ctx, input, userMessage, assistantMessage, agentResult, execution)
 	s.logger.Info("chat message finished",

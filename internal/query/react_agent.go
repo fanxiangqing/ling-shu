@@ -34,6 +34,7 @@ const (
 	AgentIntentQuery      = "query"
 	AgentIntentMultiQuery = "multi_query"
 	AgentIntentClarify    = "clarify"
+	AgentIntentTransform  = "transform"
 )
 
 type agentPlan struct {

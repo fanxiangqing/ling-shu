@@ -20,6 +20,7 @@ const (
 
 type ChartSuggestion struct {
 	Type       string   `json:"type"`
+	Title      string   `json:"title,omitempty"`
 	XField     string   `json:"x_field,omitempty"`
 	YFields    []string `json:"y_fields,omitempty"`
 	NameField  string   `json:"name_field,omitempty"`

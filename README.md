@@ -40,6 +40,7 @@ The backend keeps the core analytics flow clear and modular: project management,
 - SQL safety review: SELECT-only, forbidden write/DDL statements, row limits, timeout control, and audit logs.
 - Metadata sync for schemas, tables, columns, indexes, primary keys, and foreign keys.
 - RAG over business terms, metric definitions, and FewShot SQL examples.
+- Structured session memory for focused result artifacts and follow-up chart requests, allowing bar, line, pie, or table transformations without repeating LLM or SQL work.
 - Provider-based LLM, ASR, and TTS integrations. The current implementation focuses on Alibaba Cloud.
 - Realtime VoiceBI: streaming ASR input and streaming TTS playback.
 - Third-party embedding: each project can create Embed Apps; third-party pages load a small JS SDK that renders a floating bot and opens a modal iframe for ChatBI and project-scoped ASR/TTS.
@@ -67,6 +68,7 @@ flowchart LR
   Gate --> Service["Application services"]
 
   Service --> Agent["ReAct ChatBI Agent"]
+  Service --> Memory["Session context and result artifacts"]
   Service --> Knowledge["Business knowledge service"]
   Service --> Metadata["Metadata sync service"]
   Service --> Voice["ASR / TTS services"]
@@ -82,7 +84,8 @@ flowchart LR
   RAG --> Milvus[("Milvus vector store")]
 
   Metadata --> Sources
-  Repo --> MySQL[("MySQL metadata store")]
+  Memory --> MySQL[("MySQL metadata store")]
+  Repo --> MySQL
   Service --> Redis[("Redis cache")]
   Agent --> LLM["LLM provider"]
   Voice --> Speech["ASR / TTS provider"]
@@ -90,12 +93,23 @@ flowchart LR
   Speech --> AliyunNLS["Alibaba Cloud NLS"]
 ```
 
-The runtime has three clear boundaries:
+The runtime has five clear boundaries:
 
 - **Control plane**: tenants, users, projects, data source bindings, provider configs, permissions, and audit logs live in MySQL.
 - **Knowledge plane**: business terms, metric definitions, FewShot SQL, and document chunks are embedded and retrieved from Milvus.
+- **Memory plane**: `internal/memory` stores the session focus, result sets, dimensions, measures, units, and query lineage as structured artifacts. MySQL is the source of truth; chat messages are only used for compatibility recovery and natural-language context.
 - **Execution plane**: the agent only executes reviewed read-only SQL against project-bound data sources.
 - **Analysis plane**: Python exec is a stateless gRPC service. It only receives reviewed query result copies from Go, uses pandas/numpy for structured summaries, metrics, and chart rendering metadata, and does not connect to business databases or store session state.
+
+## Session Context And Memory
+
+Ling-Shu does not treat memory as replaying the entire raw chat history to the model. Each successful query produces traceable result artifacts containing columns, row snapshots, chart metadata, dimensions, measure units, completeness, data source IDs, and query execution IDs. Session state keeps the active artifacts and current focus. Follow-up requests are resolved by `internal/memory` before the system decides whether to reuse a result or enter the ReAct Agent flow.
+
+- Requests such as "switch to a bar chart", "make a pie chart", or "show this as a table" reuse the most relevant recent artifact when possible, without calling RAG, an LLM, or SQL.
+- When a detail result has no numeric measure, local count aggregation is allowed only if the snapshot is known to be complete. Row-limited data is never presented as a full-data aggregation.
+- Measures carry unit semantics. Scalars with incompatible units are not combined into one distribution, and equally relevant targets cause a focused clarification.
+- Every load and write is scoped by `tenant_id`, `project_id`, `session_id`, and `user_id` to prevent cross-tenant, cross-project, or cross-user recall.
+- Existing sessions require no message rewrite. Ling-Shu can derive temporary artifacts from stored `agent_result` messages and persists structured state after later successful turns.
 
 ## Supported Data Sources
 
@@ -130,6 +144,7 @@ internal/          Application modules
   datasource/      Data source drivers and metadata sync
   handler/         HTTP and realtime handlers
   llm/             LLM providers
+  memory/          Session context, result artifacts, and follow-up resolution
   middleware/      Gin middleware
   model/           GORM models
   query/           ReAct agent and SQL execution
@@ -443,7 +458,7 @@ The compose stack starts the API server, Web console, stateless Python exec, MyS
 scripts/mysql/001_init_schema.sql
 ```
 
-This first-run schema already includes the `embed_apps` and `embed_sessions` tables required by third-party embedding. Existing databases should apply incremental scripts in numeric order; this feature requires `scripts/mysql/007_embed_apps.sql`, which also adds the encrypted `App Secret` column when needed.
+The first-run schema includes the tables required by third-party embedding and session memory. Existing databases should apply incremental scripts in numeric order: third-party embedding requires `scripts/mysql/007_embed_apps.sql`, while structured session context and result artifacts require `scripts/mysql/008_chat_context_memory.sql`.
 
 If you only want to start Milvus separately:
 
@@ -505,6 +520,7 @@ sequenceDiagram
   participant User as User
   participant Web as Web Console
   participant Chat as Chat Service
+  participant Memory as Session Memory
   participant RAG as RAG Service
   participant Agent as ReAct Agent
   participant SQL as SQL Reviewer
@@ -515,21 +531,28 @@ sequenceDiagram
 
   User->>Web: Ask a business question
   Web->>Chat: Send message or audio stream
-  Chat->>RAG: Retrieve project knowledge
-  RAG-->>Chat: Terms, metrics, FewShot SQL, chunks
-  Chat->>Agent: Build task context
-  Agent->>Agent: Route data source and inspect metadata
-  Agent->>SQL: Submit generated SQL for review
-  SQL-->>Agent: Approved SQL or rejection reason
-  Chat->>DB: Execute approved read-only query
-  DB-->>Chat: Rows, execution stats, and chart rendering metadata
-  Chat->>PyExec: Send result copies and trace metadata
-  PyExec-->>Chat: Stateless analysis tables, metrics, and chart rendering metadata
-  Chat->>LLM: Observe execution results and synthesize the final answer
-  LLM-->>Chat: Business-facing answer or fallback signal
-  opt LLM synthesis unavailable
-    Chat->>Chat: Build a local answer summary from returned rows
+  Chat->>Memory: Load session state, recent artifacts, compact history
+  alt Reusable chart follow-up
+    Memory-->>Chat: Transformed dataset and chart metadata
+  else New question or unsafe to reuse
+    Memory-->>Chat: Structured context
+    Chat->>RAG: Retrieve project knowledge
+    RAG-->>Chat: Terms, metrics, FewShot SQL, chunks
+    Chat->>Agent: Build task context
+    Agent->>Agent: Route data source and inspect metadata
+    Agent->>SQL: Submit generated SQL for review
+    SQL-->>Agent: Approved SQL or rejection reason
+    Chat->>DB: Execute approved read-only query
+    DB-->>Chat: Rows, execution stats, and chart rendering metadata
+    Chat->>PyExec: Send result copies and trace metadata
+    PyExec-->>Chat: Stateless analysis tables, metrics, and chart rendering metadata
+    Chat->>LLM: Observe execution results and synthesize the final answer
+    LLM-->>Chat: Business-facing answer or fallback signal
+    opt LLM synthesis unavailable
+      Chat->>Chat: Build a local answer summary from returned rows
+    end
   end
+  Chat->>Memory: Persist session state and reusable result artifacts
   Chat->>Audit: Persist trace, SQL review, query execution
   Chat-->>Web: Stream steps, final answer, result data, speech text
 ```
@@ -539,6 +562,7 @@ Core principles:
 - **Metadata first**: Text2SQL prompts are grounded in synced schemas, table comments, column comments, keys, and project bindings.
 - **Business language first**: RAG injects domain terms and metric definitions so users can ask with words like "GMV", "active users", or internal aliases.
 - **Safety before execution**: SQL is parsed and reviewed before execution. Write statements, DDL, multi-statement payloads, and unsafe patterns are blocked.
+- **Reuse results first**: chart follow-ups prefer complete, unit-compatible artifacts from the current session and return to the Agent query flow only when local reuse is unsafe.
 - **Python sandbox stays stateless**: Go owns permissions, SQL review, audit, and chat/session state. Python only analyzes the result copies sent for the current request, and logs carry `request_id`, tenant, project, session, and user fields.
 - **Iterative ReAct loop**: the agent repeats Thought -> Action -> Observation until it has enough trustworthy data or needs user clarification.
 - **Small surface area**: the backend keeps the ordinary CRUD path simple and isolates high-change AI, RAG, provider, and connector code behind focused modules.

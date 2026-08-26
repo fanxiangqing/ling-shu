@@ -41,7 +41,7 @@ export interface ReviewResult {
 
 export interface AgentResult {
   question: string
-  intent?: 'chat' | 'query' | 'multi_query' | 'clarify'
+  intent?: 'chat' | 'query' | 'multi_query' | 'clarify' | 'transform'
   sql: string
   sql_tasks?: AgentSQLTask[]
   answer?: string

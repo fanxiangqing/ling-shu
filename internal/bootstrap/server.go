@@ -14,6 +14,7 @@ import (
 	"ling-shu/internal/datasource"
 	"ling-shu/internal/handler"
 	"ling-shu/internal/llm"
+	"ling-shu/internal/memory"
 	"ling-shu/internal/middleware"
 	"ling-shu/internal/pyexecclient"
 	"ling-shu/internal/query"
@@ -270,6 +271,7 @@ func newServices(ctx context.Context, cfg *config.Config, logger *zap.Logger, db
 	knowledgeService.SetIndexRefresher(ragService)
 
 	chatService := service.NewChatService(repos.chat, queryAgentService, queryService, ragRetriever)
+	chatService.SetMemoryManager(memory.NewManager(memory.NewGormStore(db)))
 	chatService.SetAgentContextBuilder(agentContextBuilder)
 	chatService.SetAuditRecorder(auditService)
 	if resultAnalysisService != nil {

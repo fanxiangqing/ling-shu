@@ -89,6 +89,93 @@ func TestChatServiceSendMessageStoresUserAndAssistantMessages(t *testing.T) {
 	}
 }
 
+func TestChatServiceReusesPreviousRiskDatasetForBarChartFollowUp(t *testing.T) {
+	currentRingRows := []map[string]any{{"current_ring": 1254}}
+	riskRows := []map[string]any{
+		{"风险名称": "下穿厂房", "风险等级": "II"},
+		{"风险名称": "下穿厂房", "风险等级": "II"},
+		{"风险名称": "公铁交叉", "风险等级": "II"},
+	}
+	riskCountRows := []map[string]any{{"risk_point_count": 17}}
+	currentRingCount := len(currentRingRows)
+	riskRowCount := len(riskRows)
+	riskCount := len(riskCountRows)
+	previousAgent := &query.AgentResult{
+		Question: "现在项目推进了多少环，有什么施工风险，有多少风险点",
+		Intent:   query.AgentIntentMultiQuery,
+		Answer:   "当前推进至 1254 环，共有 17 个风险点。",
+		SQLTasks: []query.AgentSQLTask{
+			{Purpose: "查询当前最大环号"},
+			{Purpose: "查询当前施工风险列表"},
+			{Purpose: "统计风险点总数"},
+		},
+	}
+	previousExecutions := []*QueryExecutionResult{
+		{
+			Execution: &model.QueryExecution{ID: 101, Status: "success", DatasourceID: 7, FinalSQL: "select current_ring from project limit 200", RowCount: &currentRingCount},
+			Columns:   []string{"current_ring"},
+			Rows:      currentRingRows,
+		},
+		{
+			Execution: &model.QueryExecution{ID: 102, Status: "success", DatasourceID: 7, FinalSQL: "select risk_name as 风险名称, risk_level as 风险等级 from risks limit 200", RowCount: &riskRowCount},
+			Columns:   []string{"风险名称", "风险等级"},
+			Rows:      riskRows,
+		},
+		{
+			Execution: &model.QueryExecution{ID: 103, Status: "success", DatasourceID: 7, FinalSQL: "select count(*) as risk_point_count from risks limit 200", RowCount: &riskCount},
+			Columns:   []string{"risk_point_count"},
+			Rows:      riskCountRows,
+		},
+	}
+	previousContent, err := marshalAssistantMessage(previousAgent, previousExecutions[0], previousExecutions, 1, maxChatAgentLoops)
+	if err != nil {
+		t.Fatalf("marshal previous assistant message: %v", err)
+	}
+	chatRepo := &chatFakeRepository{
+		session: &model.ChatSession{
+			BaseModel: model.BaseModel{ID: 10},
+			TenantID:  1,
+			ProjectID: 2,
+			UserID:    3,
+			Status:    "active",
+		},
+		recentMessages: []model.ChatMessage{
+			{ID: 1, Role: "user", Content: previousAgent.Question, ContentType: "text", CreatedAt: time.Now().Add(-time.Minute)},
+			{ID: 2, Role: "assistant", Content: previousContent, ContentType: "agent_result", CreatedAt: time.Now().Add(-time.Minute)},
+		},
+	}
+	agent := &chatFakeAgentRunner{}
+	executor := &chatFakeQueryExecutor{}
+	knowledge := &chatFakeKnowledgeProvider{err: errors.New("memory fast path must not load RAG")}
+	service := NewChatService(chatRepo, agent, executor, knowledge)
+
+	result, err := service.SendMessage(context.Background(), SendChatMessageInput{
+		TenantID:     1,
+		ProjectID:    2,
+		SessionID:    10,
+		UserID:       3,
+		Content:      "给我制作一个柱状图展示",
+		DatasourceID: 7,
+		AutoExecute:  true,
+		MaxRows:      200,
+	})
+	if err != nil {
+		t.Fatalf("send chart follow-up: %v", err)
+	}
+	if agent.calls != 0 || executor.calls != 0 {
+		t.Fatalf("expected memory fast path without agent or SQL, agent=%d executor=%d", agent.calls, executor.calls)
+	}
+	if result.Agent.Intent != query.AgentIntentTransform || result.Execution == nil {
+		t.Fatalf("expected transformed execution, got %+v", result)
+	}
+	if result.Execution.Chart.Type != query.ChartBar || result.Execution.Chart.XField != "风险名称" {
+		t.Fatalf("expected risk-name bar chart, got %+v", result.Execution.Chart)
+	}
+	if len(result.Execution.Rows) != 2 || result.Execution.Rows[0]["数量"] != 2 {
+		t.Fatalf("expected grouped risk rows, got %+v", result.Execution.Rows)
+	}
+}
+
 func TestChatServiceStreamMessageEmitsStepsAndStoresResult(t *testing.T) {
 	chatRepo := &chatFakeRepository{
 		session: &model.ChatSession{
