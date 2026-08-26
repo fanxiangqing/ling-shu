@@ -41,6 +41,8 @@ The backend keeps the core analytics flow clear and modular: project management,
 - Metadata sync for schemas, tables, columns, indexes, primary keys, and foreign keys.
 - RAG over business terms, metric definitions, and FewShot SQL examples.
 - Structured session memory for focused result artifacts and follow-up chart requests, allowing bar, line, pie, or table transformations without repeating LLM or SQL work.
+- Cross-session user memory for stable preferences, responsibilities, and conventions, with explicit remember/forget commands, candidate confirmation, project overrides, semantic recall, and a personal management UI.
+- Agent time context using the browser's IANA timezone and one request-scoped clock snapshot across planning, routing, Text2SQL, result synthesis, and memory extraction prompts.
 - Provider-based LLM, ASR, and TTS integrations. The current implementation focuses on Alibaba Cloud.
 - Realtime VoiceBI: streaming ASR input and streaming TTS playback.
 - Third-party embedding: each project can create Embed Apps; third-party pages load a small JS SDK that renders a floating bot and opens a modal iframe for ChatBI and project-scoped ASR/TTS.
@@ -68,7 +70,7 @@ flowchart LR
   Gate --> Service["Application services"]
 
   Service --> Agent["ReAct ChatBI Agent"]
-  Service --> Memory["Session context and result artifacts"]
+  Service --> Memory["Session context and user memory"]
   Service --> Knowledge["Business knowledge service"]
   Service --> Metadata["Metadata sync service"]
   Service --> Voice["ASR / TTS services"]
@@ -97,11 +99,11 @@ The runtime has five clear boundaries:
 
 - **Control plane**: tenants, users, projects, data source bindings, provider configs, permissions, and audit logs live in MySQL.
 - **Knowledge plane**: business terms, metric definitions, FewShot SQL, and document chunks are embedded and retrieved from Milvus.
-- **Memory plane**: `internal/memory` stores the session focus, result sets, dimensions, measures, units, and query lineage as structured artifacts. MySQL is the source of truth; chat messages are only used for compatibility recovery and natural-language context.
+- **Memory plane**: `internal/memory` manages both session result artifacts and cross-session personal memory. MySQL stores memory records, evidence, status, events, session episodes, and durable jobs. A separate Milvus collection supports semantic user-memory recall.
 - **Execution plane**: the agent only executes reviewed read-only SQL against project-bound data sources.
 - **Analysis plane**: Python exec is a stateless gRPC service. It only receives reviewed query result copies from Go, uses pandas/numpy for structured summaries, metrics, and chart rendering metadata, and does not connect to business databases or store session state.
 
-## Session Context And Memory
+## Session Context And User Memory
 
 Ling-Shu does not treat memory as replaying the entire raw chat history to the model. Each successful query produces traceable result artifacts containing columns, row snapshots, chart metadata, dimensions, measure units, completeness, data source IDs, and query execution IDs. Session state keeps the active artifacts and current focus. Follow-up requests are resolved by `internal/memory` before the system decides whether to reuse a result or enter the ReAct Agent flow.
 
@@ -110,6 +112,20 @@ Ling-Shu does not treat memory as replaying the entire raw chat history to the m
 - Measures carry unit semantics. Scalars with incompatible units are not combined into one distribution, and equally relevant targets cause a focused clarification.
 - Every load and write is scoped by `tenant_id`, `project_id`, `session_id`, and `user_id` to prevent cross-tenant, cross-project, or cross-user recall.
 - Existing sessions require no message rewrite. Ling-Shu can derive temporary artifacts from stored `agent_result` messages and persists structured state after later successful turns.
+
+### Cross-Session User Memory
+
+Users can say "remember that I prefer bar charts", "what do you remember about me?", or "forget my chart preference" in chat. The **My Memory** modal opened from the sidebar also supports create, edit, confirm, reject, delete, and clear operations.
+
+- Explicit memories become active immediately. Stable personal context inferred from ordinary conversations is stored as a `candidate` and is never injected into Agent prompts until the user confirms it.
+- Memory is project-scoped by default. Tenant-wide personal memory is created only when the user explicitly asks for all projects or selects that scope in the UI. A project value overrides a tenant-wide value with the same stable key.
+- Recall loads records by `tenant_id + project_id + user_id`, merges lexical and semantic scores, then filters status, expiry, sensitivity, duplicates, and prompt character budget.
+- Long-term memory accepts stable personal profiles, preferences, responsibilities, conventions, and corrections. Restricted sensitive content is rejected by policy. Recalled memory is labeled as user background data and cannot override the current request, data permissions, security rules, or metric definitions.
+- Ordinary turns update expiring session episodes. Durable `memory_jobs` asynchronously extract candidates and maintain vectors, retrying failures up to three times. Lexical recall remains available when Milvus is unavailable.
+
+### Agent Time Context
+
+Text, realtime voice, and embedded ChatBI requests send the browser's IANA timezone, such as `Asia/Shanghai`. The server creates one clock snapshot at request start and exposes local time, timezone, UTC offset, UTC time, and weekday to every Agent LLM prompt. Relative expressions such as "today", "yesterday", "this week", and "recently" therefore use the user's clock. If the browser timezone is missing or invalid, Ling-Shu tries the user's saved timezone preference and then `app.timezone`.
 
 ## Supported Data Sources
 
@@ -144,7 +160,7 @@ internal/          Application modules
   datasource/      Data source drivers and metadata sync
   handler/         HTTP and realtime handlers
   llm/             LLM providers
-  memory/          Session context, result artifacts, and follow-up resolution
+  memory/          Session artifacts, user memory, recall policy, and durable jobs
   middleware/      Gin middleware
   model/           GORM models
   query/           ReAct agent and SQL execution
@@ -179,6 +195,7 @@ The most common environment variables are:
 
 ```bash
 export LING_SHU_ALIYUN_API_KEY="your-dashscope-api-key"
+export LING_SHU_APP_TIMEZONE="Asia/Shanghai"
 export LING_SHU_ASR_ENABLED=true
 export LING_SHU_TTS_ENABLED=true
 export ALIYUN_AK_ID="your-access-key-id"
@@ -458,7 +475,9 @@ The compose stack starts the API server, Web console, stateless Python exec, MyS
 scripts/mysql/001_init_schema.sql
 ```
 
-The first-run schema includes the tables required by third-party embedding and session memory. Existing databases should apply incremental scripts in numeric order: third-party embedding requires `scripts/mysql/007_embed_apps.sql`, while structured session context and result artifacts require `scripts/mysql/008_chat_context_memory.sql`.
+The first-run schema includes tables for third-party embedding, session memory, and user memory. Existing databases should apply incremental scripts in numeric order: `scripts/mysql/007_embed_apps.sql` for third-party embedding, `scripts/mysql/008_chat_context_memory.sql` for structured session context, and `scripts/mysql/009_user_long_term_memory.sql` for cross-session memory records, evidence, events, session episodes, and durable jobs.
+
+When Milvus is enabled, user memory uses the separate `<rag.milvus.collection>_user_memories` collection with the same embedding dimension as the knowledge collection.
 
 If you only want to start Milvus separately:
 
@@ -582,6 +601,8 @@ Common modules:
 - `/auth/*` user registration and login
 - `/tenants/*` tenant and tenant member management, including member enable/disable/delete
 - `/projects/*` projects, project member authorization, provider config, knowledge, RAG
+- `/projects/:project_id/memories/me` personal memory list, create, edit, confirm, reject, delete, and clear operations
+- `/projects/:project_id/memory-episodes/me` personal project session episodes
 - `/datasources/*` data source test, metadata sync, metadata preview
 - `/chat/*` sessions, messages, streaming message API, realtime voice API
 - `/embed/*` third-party embed token, bootstrap, embedded chat messages, server-side ChatBI integration, and realtime voice APIs

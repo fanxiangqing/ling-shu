@@ -39,6 +39,8 @@ Ling-Shu 是一个企业级 ChatBI / Text2SQL / VoiceBI 平台。用户可以用
 - 元数据同步：Schema、Table、Column、Index、PrimaryKey、ForeignKey。
 - 业务知识 RAG：业务术语、指标口径、FewShot SQL。
 - 结构化会话记忆：保存当前焦点和查询结果产物，支持基于上一轮结果继续制作柱状图、折线图、饼图或表格，无需重复调用 LLM 和 SQL。
+- 跨会话用户长期记忆：保存稳定的个人偏好、职责和约定，支持显式记住/忘记、候选确认、项目级覆盖、语义召回和个人管理界面。
+- Agent 时间上下文：浏览器 IANA 时区优先，每次请求固定一个时间快照并注入规划、路由、Text2SQL、结果综合和记忆提取 Prompt。
 - LLM / ASR / TTS Provider 化，目前重点适配阿里云。
 - VoiceBI：流式 ASR 输入和流式 TTS 播放。
 - 第三方系统内嵌：项目可创建 Embed App，第三方页面通过轻量 JS SDK 出现悬浮机器人，并在弹窗 iframe 中完成文本问数和项目级 ASR/TTS 语音交互。
@@ -66,7 +68,7 @@ flowchart LR
   Gate --> Service["应用服务层"]
 
   Service --> Agent["ReAct 问数 Agent"]
-  Service --> Memory["会话上下文与结果产物"]
+  Service --> Memory["会话上下文与用户记忆"]
   Service --> Knowledge["业务知识服务"]
   Service --> Metadata["元数据同步服务"]
   Service --> Voice["ASR / TTS 服务"]
@@ -95,11 +97,11 @@ flowchart LR
 
 - **控制面**：租户、用户、项目、数据源绑定、Provider 配置、权限和审计记录保存在 MySQL。
 - **知识面**：业务术语、指标口径、FewShot SQL 和文档切片向量化后进入 Milvus，用于项目级 RAG 召回。
-- **记忆面**：`internal/memory` 把会话焦点、结果集、维度、指标、单位和查询血缘保存为结构化产物；MySQL 是事实来源，聊天消息只用于兼容恢复和自然语言上下文。
+- **记忆面**：`internal/memory` 同时管理会话内的结果产物和跨会话的个人长期记忆。MySQL 保存记忆正文、证据、状态、事件、会话摘要与后台任务；Milvus 的独立集合用于个人记忆语义召回。
 - **执行面**：Agent 只能对当前项目绑定的数据源执行通过审核的只读 SQL。
 - **分析面**：Python exec 是无状态 gRPC 服务，只接收 Go 传入的已审核查询结果副本，用 pandas/numpy 做结构化摘要、指标和图表展示元数据，不连接业务库、不保存会话状态。
 
-## 会话上下文与记忆
+## 会话上下文与用户记忆
 
 Ling-Shu 不把“记忆”等同于把全部聊天历史重新发送给模型。每轮成功查询都会生成可追溯的结果产物，记录字段、行快照、图表配置、维度、指标单位、数据完整性、数据源和查询执行 ID。会话状态只保存当前有效产物和焦点产物，后续追问先由 `memory` 包解析，再决定复用结果还是进入 ReAct Agent。
 
@@ -108,6 +110,20 @@ Ling-Shu 不把“记忆”等同于把全部聊天历史重新发送给模型�
 - 指标带有单位语义，不同单位的标量不会被拼成同一张分布图；候选目标同等相关时会要求用户选择。
 - 读取和写入始终校验 `tenant_id`、`project_id`、`session_id` 和 `user_id`，避免跨租户、跨项目或跨用户召回。
 - 旧会话无需迁移消息内容；系统可以从已有 `agent_result` 消息提炼临时产物，并在后续成功轮次写入新的结构化状态。
+
+### 跨会话用户长期记忆
+
+用户可以在对话中说“请记住以后默认用柱状图”“你记得我什么”“忘记我的图表偏好”，也可以从左侧导航打开“我的记忆”弹窗进行添加、编辑、确认、拒绝、删除和清空。
+
+- 显式保存立即生效；模型从普通对话中识别出的稳定个人信息只进入 `candidate`，必须由用户确认后才会进入 Agent Prompt。
+- 默认作用于当前项目；用户明确说“所有项目”或在管理界面选择“所有项目”时，才写入租户级个人记忆。同一个稳定键存在两级值时，当前项目值覆盖跨项目值。
+- 召回先按 `tenant_id + project_id + user_id` 查询 MySQL，再合并关键词分数和独立 Milvus 集合中的语义分数，并在注入 Prompt 前执行状态、过期、敏感级别、去重和字符预算过滤。
+- 长期记忆只接收稳定的个人信息、偏好、职责、约定和纠正；受限敏感内容会被策略层拒绝。召回内容在 Prompt 中被标记为用户背景数据，不能覆盖当前问题、数据权限、安全规则或指标口径。
+- 每轮普通对话会更新有过期时间的会话摘要，并通过 `memory_jobs` 异步执行候选提取和向量索引。任务最多重试三次，Milvus 不可用时关键词召回仍可继续工作。
+
+### Agent 时间上下文
+
+文本、实时语音和内嵌问数都会发送浏览器的 IANA 时区，例如 `Asia/Shanghai`。服务端在请求开始时生成一次时间快照，统一提供用户本地时间、时区、UTC 偏移、UTC 时间和星期，供所有 Agent LLM Prompt 解释“现在、今天、昨天、本周、最近”等相对时间。浏览器时区缺失或非法时，先尝试用户保存的时区偏好，再使用 `app.timezone`。
 
 ## 数据源支持
 
@@ -142,7 +158,7 @@ internal/          业务模块
   datasource/      数据源插件与元数据同步
   handler/         HTTP 和实时接口
   llm/             LLM Provider
-  memory/          会话上下文、结果产物与追问解析
+  memory/          会话产物、用户长期记忆、召回策略与后台任务
   middleware/      Gin 中间件
   model/           GORM Model
   query/           ReAct Agent 与 SQL 执行
@@ -177,6 +193,7 @@ cp configs/config.example.yaml configs/config.yaml
 
 ```bash
 export LING_SHU_ALIYUN_API_KEY="your-dashscope-api-key"
+export LING_SHU_APP_TIMEZONE="Asia/Shanghai"
 export LING_SHU_ASR_ENABLED=true
 export LING_SHU_TTS_ENABLED=true
 export ALIYUN_AK_ID="your-access-key-id"
@@ -456,7 +473,9 @@ docker compose --env-file .env up -d --build
 scripts/mysql/001_init_schema.sql
 ```
 
-该初始化脚本已包含第三方内嵌和会话记忆所需的表。已有数据库升级时请按编号执行增量脚本：第三方内嵌需要 `scripts/mysql/007_embed_apps.sql`，结构化会话上下文和结果产物需要 `scripts/mysql/008_chat_context_memory.sql`。
+该初始化脚本已包含第三方内嵌、会话记忆和用户长期记忆所需的表。已有数据库升级时请按编号执行增量脚本：第三方内嵌使用 `scripts/mysql/007_embed_apps.sql`，结构化会话上下文使用 `scripts/mysql/008_chat_context_memory.sql`，跨会话用户长期记忆、证据、事件、会话摘要和后台任务使用 `scripts/mysql/009_user_long_term_memory.sql`。
+
+Milvus 启用后，用户长期记忆会使用独立集合 `<rag.milvus.collection>_user_memories`，其向量维度与知识库集合保持一致。
 
 如果只想单独启动 Milvus：
 
@@ -590,6 +609,8 @@ sequenceDiagram
 - `/auth/*` 用户注册和登录
 - `/tenants/*` 租户和租户成员，支持成员启用、停用和删除
 - `/projects/*` 项目、项目成员授权、Provider 配置、知识库、RAG
+- `/projects/:project_id/memories/me` 当前用户的长期记忆列表、创建、编辑、确认、拒绝、删除和清空
+- `/projects/:project_id/memory-episodes/me` 当前用户的项目会话摘要
 - `/datasources/*` 数据源测试、元数据同步、元数据预览
 - `/chat/*` 会话、消息、消息流式接口、实时语音接口
 - `/embed/*` 第三方内嵌 Token、Bootstrap、嵌入会话消息、服务端问数集成和实时语音接口
