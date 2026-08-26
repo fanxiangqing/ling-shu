@@ -1,0 +1,113 @@
+-- Ling-Shu cross-session user memory, evidence, audit events, episodes and durable jobs.
+
+CREATE TABLE IF NOT EXISTS user_memories (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  project_id BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0 means tenant-wide user memory',
+  user_id BIGINT UNSIGNED NOT NULL,
+  kind VARCHAR(32) NOT NULL,
+  memory_key VARCHAR(191) NOT NULL DEFAULT '',
+  canonical_hash CHAR(64) NOT NULL,
+  content TEXT NOT NULL,
+  value_json JSON NOT NULL,
+  applicability_json JSON NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'candidate',
+  source_type VARCHAR(32) NOT NULL DEFAULT 'inferred',
+  confidence DECIMAL(6,5) NOT NULL DEFAULT 0.50000,
+  salience DECIMAL(6,5) NOT NULL DEFAULT 0.50000,
+  sensitivity VARCHAR(32) NOT NULL DEFAULT 'normal',
+  evidence_count INT NOT NULL DEFAULT 1,
+  version BIGINT UNSIGNED NOT NULL DEFAULT 1,
+  observed_at DATETIME(3) DEFAULT NULL,
+  valid_from DATETIME(3) DEFAULT NULL,
+  expires_at DATETIME(3) DEFAULT NULL,
+  last_confirmed_at DATETIME(3) DEFAULT NULL,
+  last_recalled_at DATETIME(3) DEFAULT NULL,
+  last_applied_at DATETIME(3) DEFAULT NULL,
+  apply_count INT NOT NULL DEFAULT 0,
+  source_session_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  source_message_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  embedding_provider VARCHAR(64) NOT NULL DEFAULT '',
+  embedding_model VARCHAR(128) NOT NULL DEFAULT '',
+  vector_id VARCHAR(128) NOT NULL DEFAULT '',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_user_memories_canonical (tenant_id, project_id, user_id, canonical_hash),
+  KEY idx_user_memories_lookup (tenant_id, project_id, user_id, status, kind),
+  KEY idx_user_memories_expiry (status, expires_at),
+  KEY idx_user_memories_vector (vector_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_memory_evidence (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  memory_id BIGINT UNSIGNED NOT NULL,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  project_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  user_id BIGINT UNSIGNED NOT NULL,
+  session_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  message_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  evidence_type VARCHAR(32) NOT NULL,
+  evidence_summary VARCHAR(512) NOT NULL DEFAULT '',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY idx_user_memory_evidence_memory (memory_id, created_at),
+  KEY idx_user_memory_evidence_source (tenant_id, project_id, user_id, session_id, message_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_memory_events (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  memory_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  project_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  user_id BIGINT UNSIGNED NOT NULL,
+  operation VARCHAR(32) NOT NULL,
+  memory_key VARCHAR(191) NOT NULL DEFAULT '',
+  metadata_json JSON NOT NULL,
+  actor_user_id BIGINT UNSIGNED NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY idx_user_memory_events_scope (tenant_id, project_id, user_id, created_at),
+  KEY idx_user_memory_events_memory (memory_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS chat_session_episodes (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  project_id BIGINT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  session_id BIGINT UNSIGNED NOT NULL,
+  summary TEXT NOT NULL,
+  topics_json JSON NOT NULL,
+  decisions_json JSON NOT NULL,
+  open_loops_json JSON NOT NULL,
+  query_execution_ids_json JSON NOT NULL,
+  metadata_json JSON NOT NULL,
+  expires_at DATETIME(3) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_chat_session_episodes_session (session_id),
+  KEY idx_chat_session_episodes_scope (tenant_id, project_id, user_id, updated_at),
+  KEY idx_chat_session_episodes_expiry (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS memory_jobs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  project_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  user_id BIGINT UNSIGNED NOT NULL,
+  session_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  message_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  job_type VARCHAR(32) NOT NULL,
+  payload_json JSON NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'pending',
+  attempts INT NOT NULL DEFAULT 0,
+  run_after DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  last_error TEXT,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY idx_memory_jobs_poll (status, run_after, id),
+  KEY idx_memory_jobs_scope (tenant_id, project_id, user_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

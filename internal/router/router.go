@@ -34,6 +34,7 @@ type Dependencies struct {
 	QueryAgentHandler     *handler.QueryAgentHandler
 	AuditHandler          *handler.AuditHandler
 	EmbedHandler          *handler.EmbedHandler
+	UserMemoryHandler     *handler.UserMemoryHandler
 }
 
 func New(deps Dependencies) *gin.Engine {
@@ -97,6 +98,13 @@ func New(deps Dependencies) *gin.Engine {
 			tenants.POST("/:tenant_id/datasources", append(authz("datasource.manage", middleware.RequireTenantScope()), deps.DatasourceHandler.Create)...)
 			tenants.GET("/:tenant_id/chat/sessions", append(authz("chat.use", middleware.RequireTenantScope()), deps.ChatHandler.ListSessions)...)
 			tenants.POST("/:tenant_id/chat/sessions", append(authz("chat.use", middleware.RequireTenantScope()), deps.ChatHandler.CreateSession)...)
+			tenants.GET("/:tenant_id/memories/me", append(authz("chat.use", middleware.RequireTenantScope()), deps.UserMemoryHandler.List)...)
+			tenants.POST("/:tenant_id/memories/me", append(authz("chat.use", middleware.RequireTenantScope()), deps.UserMemoryHandler.Save)...)
+			tenants.PATCH("/:tenant_id/memories/me/:id", append(authz("chat.use", middleware.RequireTenantScope()), deps.UserMemoryHandler.Update)...)
+			tenants.DELETE("/:tenant_id/memories/me/:id", append(authz("chat.use", middleware.RequireTenantScope()), deps.UserMemoryHandler.Delete)...)
+			tenants.POST("/:tenant_id/memories/me/:id/confirm", append(authz("chat.use", middleware.RequireTenantScope()), deps.UserMemoryHandler.Confirm)...)
+			tenants.POST("/:tenant_id/memories/me/:id/reject", append(authz("chat.use", middleware.RequireTenantScope()), deps.UserMemoryHandler.Reject)...)
+			tenants.DELETE("/:tenant_id/memories/me", append(authz("chat.use", middleware.RequireTenantScope()), deps.UserMemoryHandler.Clear)...)
 		}
 
 		projects := v1.Group("/projects")
@@ -118,6 +126,14 @@ func New(deps Dependencies) *gin.Engine {
 			projects.POST("/:project_id/datasources", append(authz("datasource.manage", middleware.RequireProjectScope()), deps.DatasourceHandler.Create)...)
 			projects.GET("/:project_id/chat/sessions", deps.ChatHandler.ListSessions)
 			projects.POST("/:project_id/chat/sessions", deps.ChatHandler.CreateSession)
+			projects.GET("/:project_id/memories/me", append(authz("chat.use", middleware.RequireProjectScope()), deps.UserMemoryHandler.List)...)
+			projects.POST("/:project_id/memories/me", append(authz("chat.use", middleware.RequireProjectScope()), deps.UserMemoryHandler.Save)...)
+			projects.PATCH("/:project_id/memories/me/:id", append(authz("chat.use", middleware.RequireProjectScope()), deps.UserMemoryHandler.Update)...)
+			projects.DELETE("/:project_id/memories/me/:id", append(authz("chat.use", middleware.RequireProjectScope()), deps.UserMemoryHandler.Delete)...)
+			projects.POST("/:project_id/memories/me/:id/confirm", append(authz("chat.use", middleware.RequireProjectScope()), deps.UserMemoryHandler.Confirm)...)
+			projects.POST("/:project_id/memories/me/:id/reject", append(authz("chat.use", middleware.RequireProjectScope()), deps.UserMemoryHandler.Reject)...)
+			projects.DELETE("/:project_id/memories/me", append(authz("chat.use", middleware.RequireProjectScope()), deps.UserMemoryHandler.Clear)...)
+			projects.GET("/:project_id/memory-episodes/me", append(authz("chat.use", middleware.RequireProjectScope()), deps.UserMemoryHandler.ListEpisodes)...)
 			projects.GET("/:project_id/kb/terms", deps.KnowledgeHandler.ListTerms)
 			projects.POST("/:project_id/kb/terms", append(authz("kb.manage", middleware.RequireProjectScope()), deps.KnowledgeHandler.CreateTerm)...)
 			projects.PATCH("/:project_id/kb/terms/:id/enabled", append(authz("kb.manage", middleware.RequireProjectScope()), deps.KnowledgeHandler.UpdateTermEnabled)...)

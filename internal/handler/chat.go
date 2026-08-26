@@ -27,6 +27,7 @@ type sendChatMessageRequest struct {
 	ProjectID             uint64                  `json:"project_id" binding:"required"`
 	UserID                uint64                  `json:"user_id"`
 	Content               string                  `json:"content" binding:"required"`
+	Timezone              string                  `json:"timezone"`
 	DatasourceID          uint64                  `json:"datasource_id"`
 	SelectedDatasourceIDs []uint64                `json:"selected_datasource_ids"`
 	MaxRows               int                     `json:"max_rows"`
@@ -122,6 +123,7 @@ func (h *ChatHandler) SendMessage(c *gin.Context) {
 		SessionID:             sessionID,
 		UserID:                resolveUserID(c, req.UserID),
 		Content:               req.Content,
+		Timezone:              req.Timezone,
 		DatasourceID:          req.DatasourceID,
 		SelectedDatasourceIDs: req.SelectedDatasourceIDs,
 		MaxRows:               req.MaxRows,
@@ -158,6 +160,7 @@ func (h *ChatHandler) StreamMessage(c *gin.Context) {
 		SessionID:             sessionID,
 		UserID:                resolveUserID(c, req.UserID),
 		Content:               req.Content,
+		Timezone:              req.Timezone,
 		DatasourceID:          req.DatasourceID,
 		SelectedDatasourceIDs: req.SelectedDatasourceIDs,
 		MaxRows:               req.MaxRows,

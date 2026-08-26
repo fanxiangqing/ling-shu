@@ -34,6 +34,7 @@ type VoiceChatInput struct {
 	UserID                uint64
 	AudioURL              string
 	Language              string
+	Timezone              string
 	AutoExecute           bool
 	MaxRows               int
 	DatasourceID          uint64
@@ -52,6 +53,7 @@ type RealtimeVoiceChatInput struct {
 	SessionID             uint64
 	UserID                uint64
 	Language              string
+	Timezone              string
 	AutoExecute           bool
 	MaxRows               int
 	DatasourceID          uint64
@@ -143,6 +145,7 @@ func (s *VoiceService) Chat(ctx context.Context, input VoiceChatInput) (*VoiceCh
 		SessionID:             input.SessionID,
 		UserID:                input.UserID,
 		Content:               content,
+		Timezone:              input.Timezone,
 		DatasourceID:          input.DatasourceID,
 		SelectedDatasourceIDs: input.SelectedDatasourceIDs,
 		MaxRows:               input.MaxRows,
@@ -254,6 +257,7 @@ func (s *VoiceService) StreamChat(ctx context.Context, input VoiceChatInput, emi
 		SessionID:             input.SessionID,
 		UserID:                input.UserID,
 		Content:               content,
+		Timezone:              input.Timezone,
 		DatasourceID:          input.DatasourceID,
 		SelectedDatasourceIDs: input.SelectedDatasourceIDs,
 		MaxRows:               input.MaxRows,
@@ -367,6 +371,7 @@ func (s *VoiceService) StreamRealtimeChat(ctx context.Context, input RealtimeVoi
 		SessionID:             input.SessionID,
 		UserID:                input.UserID,
 		Content:               content,
+		Timezone:              input.Timezone,
 		DatasourceID:          input.DatasourceID,
 		SelectedDatasourceIDs: input.SelectedDatasourceIDs,
 		MaxRows:               input.MaxRows,

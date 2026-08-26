@@ -34,6 +34,7 @@ type App struct {
 	cacheStore  cache.Store
 	db          *gorm.DB
 	vectorStore rag.VectorStore
+	memoryStore rag.VectorStore
 	execClient  *pyexecclient.Client
 }
 
@@ -54,7 +55,9 @@ func BuildApplication(ctx context.Context, cfg *config.Config, logger *zap.Logge
 		return nil, err
 	}
 
-	engine := router.New(newRouterDependencies(cfg, logger, services, newHandlers(services), cacheStore))
+	handlers := newHandlers(services)
+	handlers.queryAgent.SetDefaultTimezone(cfg.App.Timezone)
+	engine := router.New(newRouterDependencies(cfg, logger, services, handlers, cacheStore))
 	return &App{
 		server: &http.Server{
 			Addr:              cfg.Server.Addr(),
@@ -67,6 +70,7 @@ func BuildApplication(ctx context.Context, cfg *config.Config, logger *zap.Logge
 		cacheStore:  cacheStore,
 		db:          db,
 		vectorStore: services.vectorStore,
+		memoryStore: services.memoryVectorStore,
 		execClient:  services.execClient,
 	}, nil
 }
@@ -85,6 +89,11 @@ func (a *App) Close(logger *zap.Logger) {
 	if a.vectorStore != nil {
 		if err := a.vectorStore.Close(); err != nil {
 			logger.Warn("close milvus rag store failed", zap.Error(err))
+		}
+	}
+	if a.memoryStore != nil {
+		if err := a.memoryStore.Close(); err != nil {
+			logger.Warn("close milvus user memory store failed", zap.Error(err))
 		}
 	}
 	if err := closeStore(a.cacheStore); err != nil {
@@ -157,26 +166,28 @@ func newProviders(cfg *config.Config) providers {
 }
 
 type services struct {
-	tokenManager   *authpkg.TokenManager
-	permission     *service.PermissionService
-	datasource     *service.DatasourceService
-	provider       *service.ProviderService
-	providerConfig *service.ProviderConfigService
-	query          *service.QueryService
-	queryAgent     *service.QueryAgentService
-	rag            *service.RAGService
-	audit          *service.AuditService
-	health         *service.HealthService
-	auth           *service.AuthService
-	tenant         *service.TenantService
-	project        *service.ProjectService
-	chat           *service.ChatService
-	voice          *service.VoiceService
-	knowledge      *service.KnowledgeService
-	embed          *service.EmbedService
-	vectorStore    rag.VectorStore
-	resultAnalysis *service.ResultAnalysisService
-	execClient     *pyexecclient.Client
+	tokenManager      *authpkg.TokenManager
+	permission        *service.PermissionService
+	datasource        *service.DatasourceService
+	provider          *service.ProviderService
+	providerConfig    *service.ProviderConfigService
+	query             *service.QueryService
+	queryAgent        *service.QueryAgentService
+	rag               *service.RAGService
+	audit             *service.AuditService
+	health            *service.HealthService
+	auth              *service.AuthService
+	tenant            *service.TenantService
+	project           *service.ProjectService
+	chat              *service.ChatService
+	userMemory        *service.UserMemoryService
+	voice             *service.VoiceService
+	knowledge         *service.KnowledgeService
+	embed             *service.EmbedService
+	vectorStore       rag.VectorStore
+	memoryVectorStore rag.VectorStore
+	resultAnalysis    *service.ResultAnalysisService
+	execClient        *pyexecclient.Client
 }
 
 func newServices(ctx context.Context, cfg *config.Config, logger *zap.Logger, db *gorm.DB, repos repositories, providers providers, cacheStore cache.Store) (services, error) {
@@ -193,8 +204,21 @@ func newServices(ctx context.Context, cfg *config.Config, logger *zap.Logger, db
 	if err != nil {
 		return services{}, err
 	}
+	memoryVectorStore, err := newUserMemoryVectorStore(ctx, cfg)
+	if err != nil {
+		if vectorStore != nil {
+			_ = vectorStore.Close()
+		}
+		return services{}, err
+	}
 	execClient, err := newExecClient(ctx, cfg, logger)
 	if err != nil {
+		if vectorStore != nil {
+			_ = vectorStore.Close()
+		}
+		if memoryVectorStore != nil {
+			_ = memoryVectorStore.Close()
+		}
 		return services{}, err
 	}
 
@@ -270,8 +294,37 @@ func newServices(ctx context.Context, cfg *config.Config, logger *zap.Logger, db
 	ragService := service.NewRAGService(ragIndexer, ragRetriever)
 	knowledgeService.SetIndexRefresher(ragService)
 
+	userMemoryStore := memory.NewGormUserMemoryStore(db)
+	userMemoryProviderResolver := func(ctx context.Context, scope memory.UserScope) (llm.Provider, error) {
+		provider, err := providerService.ResolveLLMProvider(ctx, service.ProviderScopeInput{
+			TenantID:  scope.TenantID,
+			ProjectID: scope.ProjectID,
+		})
+		if errors.Is(err, service.ErrProviderNotConfigured) {
+			return nil, nil
+		}
+		return provider, err
+	}
+	userMemoryManager := memory.NewUserManager(
+		userMemoryStore,
+		memory.NewLLMUserMemoryInterpreter(userMemoryProviderResolver),
+	)
+	var userMemorySemanticIndex memory.UserMemorySemanticIndex
+	if memoryVectorStore != nil {
+		userMemorySemanticIndex = memory.NewVectorUserMemoryIndex(userMemoryProviderResolver, memoryVectorStore, cfg.RAG.Milvus.TopK)
+		userMemoryManager.SetSemanticIndex(userMemorySemanticIndex)
+	}
+	userMemoryWorker := memory.NewUserMemoryWorker(
+		userMemoryStore,
+		memory.NewLLMUserMemoryExtractor(userMemoryProviderResolver),
+		userMemorySemanticIndex,
+		logger,
+	)
+	userMemoryWorker.Start(ctx)
 	chatService := service.NewChatService(repos.chat, queryAgentService, queryService, ragRetriever)
 	chatService.SetMemoryManager(memory.NewManager(memory.NewGormStore(db)))
+	chatService.SetUserMemoryManager(userMemoryManager)
+	chatService.SetDefaultTimezone(cfg.App.Timezone)
 	chatService.SetAgentContextBuilder(agentContextBuilder)
 	chatService.SetAuditRecorder(auditService)
 	if resultAnalysisService != nil {
@@ -281,28 +334,31 @@ func newServices(ctx context.Context, cfg *config.Config, logger *zap.Logger, db
 	}
 	voiceService := service.NewVoiceService(providerService, chatService)
 	embedService := service.NewEmbedService(repos.embed, repos.datasource, providerService, cfg.Auth.JWTSecret, dsnCodec)
+	userMemoryService := service.NewUserMemoryService(userMemoryManager)
 
 	out := services{
-		tokenManager:   tokenManager,
-		permission:     permissionService,
-		datasource:     datasourceService,
-		provider:       providerService,
-		providerConfig: providerConfigService,
-		query:          queryService,
-		queryAgent:     queryAgentService,
-		rag:            ragService,
-		audit:          auditService,
-		health:         healthService,
-		auth:           authService,
-		tenant:         tenantService,
-		project:        projectService,
-		chat:           chatService,
-		voice:          voiceService,
-		knowledge:      knowledgeService,
-		embed:          embedService,
-		vectorStore:    vectorStore,
-		resultAnalysis: resultAnalysisService,
-		execClient:     execClient,
+		tokenManager:      tokenManager,
+		permission:        permissionService,
+		datasource:        datasourceService,
+		provider:          providerService,
+		providerConfig:    providerConfigService,
+		query:             queryService,
+		queryAgent:        queryAgentService,
+		rag:               ragService,
+		audit:             auditService,
+		health:            healthService,
+		auth:              authService,
+		tenant:            tenantService,
+		project:           projectService,
+		chat:              chatService,
+		userMemory:        userMemoryService,
+		voice:             voiceService,
+		knowledge:         knowledgeService,
+		embed:             embedService,
+		vectorStore:       vectorStore,
+		memoryVectorStore: memoryVectorStore,
+		resultAnalysis:    resultAnalysisService,
+		execClient:        execClient,
 	}
 	out.attachLogger(logger)
 	return out, nil
@@ -369,6 +425,21 @@ func newVectorStore(ctx context.Context, cfg *config.Config) (rag.VectorStore, e
 	return store, nil
 }
 
+func newUserMemoryVectorStore(ctx context.Context, cfg *config.Config) (rag.VectorStore, error) {
+	if !cfg.RAG.Milvus.Enabled {
+		return nil, nil
+	}
+	collection := cfg.RAG.Milvus.Collection + "_user_memories"
+	store, err := rag.NewMilvusStore(ctx, rag.MilvusConfig{
+		Address: cfg.RAG.Milvus.Address, Collection: collection,
+		Dimension: cfg.RAG.Milvus.Dimension, TopK: cfg.RAG.Milvus.TopK, Timeout: cfg.RAG.Milvus.Timeout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("init milvus user memory store addr=%s collection=%s: %w", cfg.RAG.Milvus.Address, collection, err)
+	}
+	return store, nil
+}
+
 type handlers struct {
 	health         *handler.HealthHandler
 	auth           *handler.AuthHandler
@@ -386,6 +457,7 @@ type handlers struct {
 	queryAgent     *handler.QueryAgentHandler
 	audit          *handler.AuditHandler
 	embed          *handler.EmbedHandler
+	userMemory     *handler.UserMemoryHandler
 }
 
 func newHandlers(services services) handlers {
@@ -406,6 +478,7 @@ func newHandlers(services services) handlers {
 		queryAgent:     handler.NewQueryAgentHandler(services.queryAgent),
 		audit:          handler.NewAuditHandler(services.audit, services.query),
 		embed:          handler.NewEmbedHandler(services.embed, services.chat, services.voice),
+		userMemory:     handler.NewUserMemoryHandler(services.userMemory),
 	}
 }
 
@@ -434,6 +507,7 @@ func newRouterDependencies(cfg *config.Config, logger *zap.Logger, services serv
 		QueryAgentHandler:     handlers.queryAgent,
 		AuditHandler:          handlers.audit,
 		EmbedHandler:          handlers.embed,
+		UserMemoryHandler:     handlers.userMemory,
 	}
 }
 

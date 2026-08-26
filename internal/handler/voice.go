@@ -27,6 +27,7 @@ type voiceChatRequest struct {
 	UserID                uint64   `json:"user_id"`
 	AudioURL              string   `json:"audio_url" binding:"required"`
 	Language              string   `json:"language"`
+	Timezone              string   `json:"timezone"`
 	AutoExecute           bool     `json:"auto_execute"`
 	MaxRows               int      `json:"max_rows"`
 	DatasourceID          uint64   `json:"datasource_id"`
@@ -66,6 +67,7 @@ func (h *VoiceHandler) Chat(c *gin.Context) {
 		UserID:                resolveUserID(c, req.UserID),
 		AudioURL:              req.AudioURL,
 		Language:              req.Language,
+		Timezone:              req.Timezone,
 		AutoExecute:           req.AutoExecute,
 		MaxRows:               req.MaxRows,
 		DatasourceID:          req.DatasourceID,
@@ -100,6 +102,7 @@ func (h *VoiceHandler) StreamChat(c *gin.Context) {
 		UserID:                resolveUserID(c, req.UserID),
 		AudioURL:              req.AudioURL,
 		Language:              req.Language,
+		Timezone:              req.Timezone,
 		AutoExecute:           req.AutoExecute,
 		MaxRows:               req.MaxRows,
 		DatasourceID:          req.DatasourceID,
@@ -126,6 +129,7 @@ func (h *VoiceHandler) RealtimeChat(c *gin.Context) {
 	projectID := parseUint64Default(c.Query("project_id"), 0)
 	userID := resolveUserID(c, parseUint64Default(c.Query("user_id"), 0))
 	language := c.Query("language")
+	timezone := c.Query("timezone")
 	autoExecute := parseBoolDefault(c.Query("auto_execute"), true)
 	maxRows := int(parseUint64Default(c.Query("max_rows"), 0))
 	datasourceID := parseUint64Default(c.Query("datasource_id"), 0)
@@ -182,6 +186,7 @@ func (h *VoiceHandler) RealtimeChat(c *gin.Context) {
 			SessionID:             sessionID,
 			UserID:                userID,
 			Language:              language,
+			Timezone:              timezone,
 			AutoExecute:           autoExecute,
 			MaxRows:               maxRows,
 			DatasourceID:          datasourceID,

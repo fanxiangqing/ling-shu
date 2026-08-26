@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"text/template"
+	"time"
 )
 
 const (
@@ -40,6 +41,8 @@ type PromptContext struct {
 	Metrics               []AgentKnowledge
 	FewShots              []AgentFewShot
 	Conversation          []AgentMessage
+	UserMemories          []AgentMemory
+	TimeContext           AgentTimeContext
 	Permission            AgentPermission
 	SQLTasks              []AgentSQLTask
 	ExecutionResults      []AgentExecutionSummary
@@ -149,6 +152,9 @@ func NewPromptContext(req AgentRequest, dialectRules map[string]string) PromptCo
 	if maxRows <= 0 {
 		maxRows = 200
 	}
+	if strings.TrimSpace(req.TimeContext.CurrentTime) == "" {
+		req.TimeContext = NewAgentTimeContext(time.Now(), "", DefaultAgentTimezone)
+	}
 
 	available := normalizeDatasources(req)
 	selectedIDs := normalizeSelectedDatasourceIDs(req, available)
@@ -188,6 +194,8 @@ func NewPromptContext(req AgentRequest, dialectRules map[string]string) PromptCo
 		Metrics:               req.Metrics,
 		FewShots:              req.FewShots,
 		Conversation:          req.Conversation,
+		UserMemories:          req.UserMemories,
+		TimeContext:           req.TimeContext,
 		Permission:            req.Permission,
 		ResultAnalysisStatus:  resultAnalysisStatus,
 		ResultAnalysisDetail:  resultAnalysisDetail,

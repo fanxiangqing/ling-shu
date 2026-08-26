@@ -81,6 +81,8 @@ type ChatService struct {
 	resultAnalysisDetail string
 	ragRetriever         RAGRetriever
 	memoryManager        *memory.Manager
+	userMemoryManager    *memory.UserManager
+	defaultTimezone      string
 	agentContextBuilder  AgentContextBuilder
 	auditRecorder        auditpkg.Recorder
 	logger               *zap.Logger
@@ -116,6 +118,7 @@ type SendChatMessageInput struct {
 	SessionID             uint64
 	UserID                uint64
 	Content               string
+	Timezone              string
 	DatasourceID          uint64
 	SelectedDatasourceIDs []uint64
 	MaxRows               int
@@ -129,6 +132,8 @@ type SendChatMessageInput struct {
 	IP                    string
 	UserAgent             string
 	AuditOrigin           AuditOrigin
+	TimeContext           query.AgentTimeContext
+	UserMemories          []query.AgentMemory
 }
 
 type ResultSynthesisInput struct {
@@ -141,6 +146,8 @@ type ResultSynthesisInput struct {
 	Datasources           []query.AgentDatasource
 	Permission            query.AgentPermission
 	Conversation          []query.AgentMessage
+	UserMemories          []query.AgentMemory
+	TimeContext           query.AgentTimeContext
 	Tasks                 []query.AgentSQLTask
 	Executions            []*QueryExecutionResult
 	ResultAnalysisStatus  string
@@ -172,6 +179,8 @@ func NewChatService(chatRepo repository.ChatRepository, agentRunner AgentRunner,
 		resultAnalysisDetail: "Python exec 未启用；结果综合只观察 SQL 原始执行结果。",
 		ragRetriever:         ragRetriever,
 		memoryManager:        memory.NewManager(nil),
+		userMemoryManager:    memory.NewUserManager(nil, nil),
+		defaultTimezone:      query.DefaultAgentTimezone,
 		logger:               zap.NewNop(),
 	}
 }
@@ -181,6 +190,19 @@ func (s *ChatService) SetMemoryManager(manager *memory.Manager) {
 		manager = memory.NewManager(nil)
 	}
 	s.memoryManager = manager
+}
+
+func (s *ChatService) SetUserMemoryManager(manager *memory.UserManager) {
+	if manager == nil {
+		manager = memory.NewUserManager(nil, nil)
+	}
+	s.userMemoryManager = manager
+}
+
+func (s *ChatService) SetDefaultTimezone(timezone string) {
+	if query.ValidAgentTimezone(timezone) {
+		s.defaultTimezone = timezone
+	}
 }
 
 func (s *ChatService) SetAuditRecorder(recorder auditpkg.Recorder) {
@@ -343,6 +365,19 @@ func (s *ChatService) sendMessage(ctx context.Context, input SendChatMessageInpu
 			append(chatLogFields(input, content, emit != nil), zap.Error(memoryErr))...,
 		)
 	}
+	userMemoryScope := memory.UserScope{TenantID: input.TenantID, ProjectID: input.ProjectID, UserID: input.UserID}
+	timeContext := query.NewAgentTimeContext(started, input.Timezone, s.defaultTimezone)
+	preparedUserMemory, userMemoryErr := s.userMemoryManager.Prepare(ctx, userMemoryScope, content, started, timeContext.Timezone)
+	if userMemoryErr != nil {
+		s.logger.Warn("long-term user memory load failed; continuing without it",
+			append(chatLogFields(input, content, emit != nil), zap.Error(userMemoryErr))...,
+		)
+	}
+	if !query.ValidAgentTimezone(input.Timezone) && query.ValidAgentTimezone(preparedUserMemory.Timezone) {
+		timeContext = query.NewAgentTimeContext(started, preparedUserMemory.Timezone, s.defaultTimezone)
+	}
+	input.TimeContext = timeContext
+	input.UserMemories = buildAgentUserMemories(preparedUserMemory)
 	conversation := preparedMemory.Conversation
 	if len(conversation) == 0 && len(recentMessages) > 0 {
 		conversation = buildConversation(recentMessages)
@@ -354,7 +389,7 @@ func (s *ChatService) sendMessage(ctx context.Context, input SendChatMessageInpu
 		fewShots      []query.AgentFewShot
 		agentContext  AgentContext
 	)
-	if !preparedMemory.Resolution.Handled() {
+	if !preparedMemory.Resolution.Handled() && !preparedUserMemory.Operation.Handled() {
 		if s.agentRunner == nil {
 			return nil, ErrInvalidInput
 		}
@@ -408,7 +443,9 @@ func (s *ChatService) sendMessage(ctx context.Context, input SendChatMessageInpu
 		executions  []*QueryExecutionResult
 		loops       int
 	)
-	if preparedMemory.Resolution.Handled() {
+	if preparedUserMemory.Operation.Handled() {
+		agentResult, err = s.resolveUserMemoryOperation(ctx, input, userMessage.ID, preparedUserMemory.Operation, started, emit)
+	} else if preparedMemory.Resolution.Handled() {
 		agentResult, execution, err = s.resolveMemoryFollowUp(input, content, preparedMemory.Resolution, emit)
 	} else {
 		agentResult, execution, executions, loops, err = s.runAgentLoop(ctx, input, content, agentContext, businessTerms, metrics, fewShots, conversation, emit)
@@ -423,6 +460,7 @@ func (s *ChatService) sendMessage(ctx context.Context, input SendChatMessageInpu
 		)
 		return nil, err
 	}
+	applyUserMemoryPresentation(content, preparedUserMemory, execution, executions)
 
 	assistantContent, err := marshalAssistantMessage(agentResult, execution, executions, loops, maxChatAgentLoops)
 	if err != nil {
@@ -461,6 +499,16 @@ func (s *ChatService) sendMessage(ctx context.Context, input SendChatMessageInpu
 				zap.Error(err),
 			)...,
 		)
+	}
+	if !preparedUserMemory.Operation.Handled() {
+		if err := s.userMemoryManager.RecordTurn(ctx, buildUserMemoryTurnInput(input, userMessage.ID, assistantMessage.ID, agentResult, execution, executions, started)); err != nil {
+			s.logger.Warn("long-term user memory turn persist failed",
+				append(chatLogFields(input, content, emit != nil),
+					zap.Uint64("assistant_message_id", assistantMessage.ID),
+					zap.Error(err),
+				)...,
+			)
+		}
 	}
 	s.recordChatAudit(ctx, input, userMessage, assistantMessage, agentResult, execution)
 	s.logger.Info("chat message finished",
@@ -533,6 +581,8 @@ func (s *ChatService) runAgentLoop(ctx context.Context, input SendChatMessageInp
 			Metrics:               metrics,
 			FewShots:              fewShots,
 			Conversation:          conversation,
+			UserMemories:          input.UserMemories,
+			TimeContext:           input.TimeContext,
 			Permission:            agentContext.Permission,
 			ResultAnalysisStatus:  analysisPromptStatus,
 			ResultAnalysisDetail:  analysisPromptDetail,
@@ -1106,6 +1156,8 @@ func (s *ChatService) synthesizeExecutionAnswer(ctx context.Context, input SendC
 		Datasources:           agentContext.Datasources,
 		Permission:            agentContext.Permission,
 		Conversation:          conversation,
+		UserMemories:          input.UserMemories,
+		TimeContext:           input.TimeContext,
 		Tasks:                 tasks,
 		Executions:            executions,
 		ResultAnalysisStatus:  analysisStatus,

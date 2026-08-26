@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"ling-shu/internal/query"
 	"ling-shu/internal/service"
@@ -14,6 +15,7 @@ import (
 
 type QueryAgentHandler struct {
 	queryAgentService *service.QueryAgentService
+	defaultTimezone   string
 }
 
 type askRequest struct {
@@ -23,6 +25,7 @@ type askRequest struct {
 	SelectedDatasourceIDs []uint64                `json:"selected_datasource_ids"`
 	UserID                uint64                  `json:"user_id"`
 	Question              string                  `json:"question" binding:"required"`
+	Timezone              string                  `json:"timezone"`
 	MaxRows               int                     `json:"max_rows"`
 	Datasources           []query.AgentDatasource `json:"datasources"`
 	BusinessTerms         []query.AgentKnowledge  `json:"business_terms"`
@@ -33,7 +36,13 @@ type askRequest struct {
 }
 
 func NewQueryAgentHandler(queryAgentService *service.QueryAgentService) *QueryAgentHandler {
-	return &QueryAgentHandler{queryAgentService: queryAgentService}
+	return &QueryAgentHandler{queryAgentService: queryAgentService, defaultTimezone: query.DefaultAgentTimezone}
+}
+
+func (h *QueryAgentHandler) SetDefaultTimezone(timezone string) {
+	if h != nil && query.ValidAgentTimezone(timezone) {
+		h.defaultTimezone = timezone
+	}
 }
 
 func (h *QueryAgentHandler) Ask(c *gin.Context) {
@@ -43,6 +52,7 @@ func (h *QueryAgentHandler) Ask(c *gin.Context) {
 		return
 	}
 
+	now := time.Now()
 	result, err := h.queryAgentService.Ask(c.Request.Context(), service.AskInput{
 		TenantID:              req.TenantID,
 		ProjectID:             req.ProjectID,
@@ -56,6 +66,7 @@ func (h *QueryAgentHandler) Ask(c *gin.Context) {
 		Metrics:               req.Metrics,
 		FewShots:              req.FewShots,
 		Conversation:          req.Conversation,
+		TimeContext:           query.NewAgentTimeContext(now, req.Timezone, h.defaultTimezone),
 		Permission:            req.Permission,
 	})
 	if err != nil {
@@ -74,6 +85,7 @@ func (h *QueryAgentHandler) StreamAsk(c *gin.Context) {
 	}
 
 	writeSSEHeaders(c)
+	now := time.Now()
 	err := h.queryAgentService.StreamAsk(c.Request.Context(), service.AskInput{
 		TenantID:              req.TenantID,
 		ProjectID:             req.ProjectID,
@@ -87,6 +99,7 @@ func (h *QueryAgentHandler) StreamAsk(c *gin.Context) {
 		Metrics:               req.Metrics,
 		FewShots:              req.FewShots,
 		Conversation:          req.Conversation,
+		TimeContext:           query.NewAgentTimeContext(now, req.Timezone, h.defaultTimezone),
 		Permission:            req.Permission,
 	}, func(event query.AgentEvent) error {
 		return writeSSEvent(c, event.Type, event)

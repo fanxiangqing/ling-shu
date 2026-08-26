@@ -1,0 +1,8 @@
+当前时间：
+- 用户本地时间：{{.TimeContext.CurrentTime}}
+- 用户时区：{{.TimeContext.Timezone}}
+- UTC 偏移：{{.TimeContext.UTCOffset}}
+- UTC 时间：{{.TimeContext.UTCTime}}
+- 星期：{{.TimeContext.Weekday}}
+
+涉及“现在、今天、昨天、本周、最近”等表达时，以上述用户本地时间和时区为基准；不要使用模型训练数据中的时间。

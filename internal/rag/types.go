@@ -72,3 +72,10 @@ type VectorStore interface {
 	Search(ctx context.Context, req VectorSearchRequest) ([]Hit, error)
 	Close() error
 }
+
+// IncrementalVectorStore is implemented by vector stores that can mutate a
+// small set of documents without rebuilding the whole project partition.
+type IncrementalVectorStore interface {
+	UpsertDocuments(ctx context.Context, tenantID uint64, projectID uint64, docs []VectorDocument) error
+	DeleteDocuments(ctx context.Context, tenantID uint64, projectID uint64, ids []int64) error
+}

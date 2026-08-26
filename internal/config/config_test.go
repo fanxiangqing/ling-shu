@@ -18,6 +18,7 @@ func TestDefaultConfigIsValid(t *testing.T) {
 func TestLoadAppliesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("LING_SHU_SERVER_PORT", "18080")
 	t.Setenv("LING_SHU_APP_ENV", "test")
+	t.Setenv("LING_SHU_APP_TIMEZONE", "America/New_York")
 	t.Setenv("LING_SHU_JWT_SECRET", "test-secret")
 	t.Setenv("LING_SHU_DSN_SECRET", "test-dsn-secret")
 	t.Setenv("LING_SHU_LOG_FILE_ENABLED", "true")
@@ -59,6 +60,9 @@ func TestLoadAppliesEnvironmentOverrides(t *testing.T) {
 	}
 	if cfg.App.Env != "test" {
 		t.Fatalf("expected app env test, got %q", cfg.App.Env)
+	}
+	if cfg.App.Timezone != "America/New_York" {
+		t.Fatalf("expected app timezone override, got %q", cfg.App.Timezone)
 	}
 	if cfg.Providers.LLM.APIKey != "dashscope-key" {
 		t.Fatalf("expected llm api key from env")

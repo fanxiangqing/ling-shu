@@ -18,9 +18,26 @@ type AgentRequest struct {
 	Metrics               []AgentKnowledge  `json:"metrics,omitempty"`
 	FewShots              []AgentFewShot    `json:"few_shots,omitempty"`
 	Conversation          []AgentMessage    `json:"conversation,omitempty"`
+	UserMemories          []AgentMemory     `json:"user_memories,omitempty"`
+	TimeContext           AgentTimeContext  `json:"time_context,omitempty"`
 	Permission            AgentPermission   `json:"permission,omitempty"`
 	ResultAnalysisStatus  string            `json:"result_analysis_status,omitempty"`
 	ResultAnalysisDetail  string            `json:"result_analysis_detail,omitempty"`
+}
+
+type AgentTimeContext struct {
+	CurrentTime string `json:"current_time,omitempty"`
+	Timezone    string `json:"timezone,omitempty"`
+	UTCOffset   string `json:"utc_offset,omitempty"`
+	UTCTime     string `json:"utc_time,omitempty"`
+	Weekday     string `json:"weekday,omitempty"`
+}
+
+type AgentMemory struct {
+	ID         uint64 `json:"id"`
+	Kind       string `json:"kind"`
+	ScopeLevel string `json:"scope_level"`
+	Content    string `json:"content"`
 }
 
 type AgentResultSynthesisRequest struct {

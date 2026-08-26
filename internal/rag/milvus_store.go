@@ -201,6 +201,109 @@ func (s *MilvusStore) ReplaceByProject(ctx context.Context, tenantID uint64, pro
 	return nil
 }
 
+func (s *MilvusStore) UpsertDocuments(ctx context.Context, tenantID uint64, projectID uint64, docs []VectorDocument) error {
+	if s == nil || s.client == nil || tenantID == 0 || projectID == 0 {
+		return ErrInvalidRequest
+	}
+	if len(docs) == 0 {
+		return nil
+	}
+	if err := s.validateDocumentDimensions(docs); err != nil {
+		return err
+	}
+	partition := projectPartitionName(tenantID, projectID)
+	exists, err := s.client.HasPartition(ctx, s.collection, partition)
+	if err != nil {
+		return fmt.Errorf("check milvus partition: %w", err)
+	}
+	if !exists {
+		if err := s.releaseMilvusCollection(ctx); err != nil {
+			return fmt.Errorf("release milvus collection before creating partition: %w", err)
+		}
+		if err := s.client.CreatePartition(ctx, s.collection, partition); err != nil {
+			return fmt.Errorf("create milvus project partition: %w", err)
+		}
+	}
+	ids := make([]int64, 0, len(docs))
+	for _, doc := range docs {
+		ids = append(ids, doc.ID)
+	}
+	if exists {
+		if err := s.client.DeleteByPks(ctx, s.collection, partition, entity.NewColumnInt64(fieldID, ids)); err != nil {
+			return fmt.Errorf("delete existing milvus chunks: %w", err)
+		}
+	}
+	if err := s.insertDocuments(ctx, partition, docs); err != nil {
+		return err
+	}
+	return s.loadCollection(ctx)
+}
+
+func (s *MilvusStore) DeleteDocuments(ctx context.Context, tenantID uint64, projectID uint64, ids []int64) error {
+	if s == nil || s.client == nil || tenantID == 0 || projectID == 0 {
+		return ErrInvalidRequest
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	partition := projectPartitionName(tenantID, projectID)
+	exists, err := s.client.HasPartition(ctx, s.collection, partition)
+	if err != nil {
+		return fmt.Errorf("check milvus partition: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	if err := s.client.DeleteByPks(ctx, s.collection, partition, entity.NewColumnInt64(fieldID, ids)); err != nil {
+		return fmt.Errorf("delete milvus chunks: %w", err)
+	}
+	if err := s.client.Flush(ctx, s.collection, false); err != nil {
+		return fmt.Errorf("flush milvus chunks: %w", err)
+	}
+	return nil
+}
+
+func (s *MilvusStore) insertDocuments(ctx context.Context, partition string, docs []VectorDocument) error {
+	ids := make([]int64, 0, len(docs))
+	tenantIDs := make([]int64, 0, len(docs))
+	projectIDs := make([]int64, 0, len(docs))
+	datasourceIDs := make([]int64, 0, len(docs))
+	kbTypes := make([]string, 0, len(docs))
+	refIDs := make([]int64, 0, len(docs))
+	chunkNos := make([]int64, 0, len(docs))
+	chunkTexts := make([]string, 0, len(docs))
+	vectors := make([][]float32, 0, len(docs))
+	for _, doc := range docs {
+		ids = append(ids, doc.ID)
+		tenantIDs = append(tenantIDs, int64(doc.TenantID))
+		projectIDs = append(projectIDs, int64(doc.ProjectID))
+		datasourceIDs = append(datasourceIDs, int64(doc.DatasourceID))
+		kbTypes = append(kbTypes, doc.KBType)
+		refIDs = append(refIDs, int64(doc.RefID))
+		chunkNos = append(chunkNos, int64(doc.ChunkNo))
+		chunkTexts = append(chunkTexts, truncateMilvusText(doc.ChunkText))
+		vectors = append(vectors, normalizeVector(doc.Vector))
+	}
+	_, err := s.client.Insert(ctx, s.collection, partition,
+		entity.NewColumnInt64(fieldID, ids),
+		entity.NewColumnInt64(fieldTenantID, tenantIDs),
+		entity.NewColumnInt64(fieldProjectID, projectIDs),
+		entity.NewColumnInt64(fieldDatasourceID, datasourceIDs),
+		entity.NewColumnVarChar(fieldKBType, kbTypes),
+		entity.NewColumnInt64(fieldRefID, refIDs),
+		entity.NewColumnInt64(fieldChunkNo, chunkNos),
+		entity.NewColumnVarChar(fieldChunkText, chunkTexts),
+		entity.NewColumnFloatVector(fieldEmbedding, len(vectors[0]), vectors),
+	)
+	if err != nil {
+		return fmt.Errorf("insert milvus chunks: %w", err)
+	}
+	if err := s.client.Flush(ctx, s.collection, false); err != nil {
+		return fmt.Errorf("flush milvus chunks: %w", err)
+	}
+	return nil
+}
+
 func (s *MilvusStore) Search(ctx context.Context, req VectorSearchRequest) ([]Hit, error) {
 	if s == nil || s.client == nil {
 		return nil, ErrInvalidRequest

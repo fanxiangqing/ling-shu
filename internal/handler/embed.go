@@ -53,6 +53,7 @@ type bootstrapEmbedRequest struct {
 type embedSendMessageRequest struct {
 	AccessToken           string   `json:"access_token"`
 	Content               string   `json:"content" binding:"required"`
+	Timezone              string   `json:"timezone"`
 	DatasourceID          uint64   `json:"datasource_id"`
 	SelectedDatasourceIDs []uint64 `json:"selected_datasource_ids"`
 	MaxRows               int      `json:"max_rows"`
@@ -76,6 +77,7 @@ type embedServerMessageRequest struct {
 	SessionKey       string `json:"key"`
 	SessionMode      string `json:"session_mode"`
 	Content          string `json:"content" binding:"required"`
+	Timezone         string `json:"timezone"`
 	MaxRows          int    `json:"max_rows"`
 	AutoExecute      *bool  `json:"auto_execute"`
 }
@@ -366,6 +368,7 @@ func (h *EmbedHandler) StreamMessage(c *gin.Context) {
 		SessionID:             sessionID,
 		UserID:                access.EmbedSession.UserID,
 		Content:               req.Content,
+		Timezone:              req.Timezone,
 		DatasourceID:          req.DatasourceID,
 		SelectedDatasourceIDs: req.SelectedDatasourceIDs,
 		MaxRows:               req.MaxRows,
@@ -452,6 +455,7 @@ func (h *EmbedHandler) sendServerChatMessage(c *gin.Context, access *service.Emb
 		SessionID:   access.EmbedSession.ChatSessionID,
 		UserID:      access.EmbedSession.UserID,
 		Content:     req.Content,
+		Timezone:    req.Timezone,
 		MaxRows:     req.MaxRows,
 		AutoExecute: embedServerAutoExecute(req.AutoExecute),
 		RequestID:   meta.RequestID,
@@ -474,6 +478,7 @@ func (h *EmbedHandler) RealtimeVoice(c *gin.Context) {
 	}
 
 	language := c.Query("language")
+	timezone := c.Query("timezone")
 	autoExecute := parseBoolDefault(c.Query("auto_execute"), true)
 	maxRows := int(parseUint64Default(c.Query("max_rows"), 0))
 	datasourceID := parseUint64Default(c.Query("datasource_id"), 0)
@@ -526,6 +531,7 @@ func (h *EmbedHandler) RealtimeVoice(c *gin.Context) {
 			SessionID:             sessionID,
 			UserID:                access.EmbedSession.UserID,
 			Language:              language,
+			Timezone:              timezone,
 			AutoExecute:           autoExecute,
 			MaxRows:               maxRows,
 			DatasourceID:          datasourceID,

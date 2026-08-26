@@ -32,6 +32,8 @@ type AskInput struct {
 	Metrics               []query.AgentKnowledge
 	FewShots              []query.AgentFewShot
 	Conversation          []query.AgentMessage
+	UserMemories          []query.AgentMemory
+	TimeContext           query.AgentTimeContext
 	Permission            query.AgentPermission
 	ResultAnalysisStatus  string
 	ResultAnalysisDetail  string
@@ -79,6 +81,8 @@ func (s *QueryAgentService) Ask(ctx context.Context, input AskInput) (*query.Age
 		Metrics:               agentInput.Metrics,
 		FewShots:              agentInput.FewShots,
 		Conversation:          agentInput.Conversation,
+		UserMemories:          agentInput.UserMemories,
+		TimeContext:           agentInput.TimeContext,
 		Permission:            agentInput.Permission,
 		ResultAnalysisStatus:  agentInput.ResultAnalysisStatus,
 		ResultAnalysisDetail:  agentInput.ResultAnalysisDetail,
@@ -132,6 +136,8 @@ func (s *QueryAgentService) StreamAsk(ctx context.Context, input AskInput, emit 
 		Metrics:               agentInput.Metrics,
 		FewShots:              agentInput.FewShots,
 		Conversation:          agentInput.Conversation,
+		UserMemories:          agentInput.UserMemories,
+		TimeContext:           agentInput.TimeContext,
 		Permission:            agentInput.Permission,
 		ResultAnalysisStatus:  agentInput.ResultAnalysisStatus,
 		ResultAnalysisDetail:  agentInput.ResultAnalysisDetail,
@@ -169,6 +175,9 @@ func (s *QueryAgentService) synthesizeResult(ctx context.Context, input ResultSy
 		return "", query.ErrInvalidAgentInput
 	}
 	started := time.Now()
+	if strings.TrimSpace(input.TimeContext.CurrentTime) == "" {
+		input.TimeContext = query.NewAgentTimeContext(started, "", query.DefaultAgentTimezone)
+	}
 	s.logger.Info("query agent result synthesis started",
 		zap.Uint64("tenant_id", input.TenantID),
 		zap.Uint64("project_id", input.ProjectID),
@@ -190,6 +199,8 @@ func (s *QueryAgentService) synthesizeResult(ctx context.Context, input ResultSy
 			SelectedDatasourceIDs: input.SelectedDatasourceIDs,
 			Datasources:           input.Datasources,
 			Conversation:          input.Conversation,
+			UserMemories:          input.UserMemories,
+			TimeContext:           input.TimeContext,
 			Permission:            input.Permission,
 		},
 		SQLTasks:             append([]query.AgentSQLTask(nil), input.Tasks...),
@@ -239,6 +250,9 @@ func (s *QueryAgentService) SynthesizeMultiResultStream(ctx context.Context, inp
 }
 
 func (s *QueryAgentService) buildAgentInput(ctx context.Context, input AskInput) (AskInput, error) {
+	if strings.TrimSpace(input.TimeContext.CurrentTime) == "" {
+		input.TimeContext = query.NewAgentTimeContext(time.Now(), "", query.DefaultAgentTimezone)
+	}
 	if s.agentContextBuilder == nil {
 		return input, nil
 	}

@@ -25,8 +25,9 @@ type Config struct {
 }
 
 type AppConfig struct {
-	Name string `yaml:"name"`
-	Env  string `yaml:"env"`
+	Name     string `yaml:"name"`
+	Env      string `yaml:"env"`
+	Timezone string `yaml:"timezone"`
 }
 
 type ServerConfig struct {
@@ -185,8 +186,9 @@ type TTSProviderConfig struct {
 func Default() Config {
 	return Config{
 		App: AppConfig{
-			Name: "ling-shu",
-			Env:  "local",
+			Name:     "ling-shu",
+			Env:      "local",
+			Timezone: "Asia/Shanghai",
 		},
 		Server: ServerConfig{
 			Host:              "0.0.0.0",
@@ -333,6 +335,9 @@ func (c Config) Validate() error {
 	if c.App.Name == "" {
 		return errors.New("app.name is required")
 	}
+	if _, err := time.LoadLocation(c.App.Timezone); err != nil {
+		return fmt.Errorf("app.timezone must be a valid IANA timezone: %s", c.App.Timezone)
+	}
 	if c.Server.Port <= 0 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port must be between 1 and 65535: %d", c.Server.Port)
 	}
@@ -469,6 +474,7 @@ func (c ServerConfig) Addr() string {
 func applyEnv(cfg *Config) {
 	setString(&cfg.App.Name, "LING_SHU_APP_NAME")
 	setString(&cfg.App.Env, "LING_SHU_APP_ENV")
+	setString(&cfg.App.Timezone, "LING_SHU_APP_TIMEZONE")
 	setString(&cfg.Server.Host, "LING_SHU_SERVER_HOST")
 	setInt(&cfg.Server.Port, "LING_SHU_SERVER_PORT")
 	setString(&cfg.Server.Mode, "LING_SHU_SERVER_MODE")

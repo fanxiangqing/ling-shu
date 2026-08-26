@@ -513,6 +513,118 @@ CREATE TABLE chat_artifacts (
   KEY idx_chat_artifacts_execution (source_query_execution_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='问数会话可复用结果产物表';
 
+CREATE TABLE user_memories (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  tenant_id BIGINT UNSIGNED NOT NULL COMMENT '租户ID',
+  project_id BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '项目ID，0表示租户级用户记忆',
+  user_id BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
+  kind VARCHAR(32) NOT NULL COMMENT '记忆类型',
+  memory_key VARCHAR(191) NOT NULL DEFAULT '' COMMENT '结构化记忆键',
+  canonical_hash CHAR(64) NOT NULL COMMENT '规范化内容哈希',
+  content TEXT NOT NULL COMMENT '可读记忆内容',
+  value_json JSON NOT NULL COMMENT '结构化值',
+  applicability_json JSON NOT NULL COMMENT '适用条件',
+  status VARCHAR(32) NOT NULL DEFAULT 'candidate' COMMENT '生命周期状态',
+  source_type VARCHAR(32) NOT NULL DEFAULT 'inferred' COMMENT '来源类型',
+  confidence DECIMAL(6,5) NOT NULL DEFAULT 0.50000 COMMENT '置信度',
+  salience DECIMAL(6,5) NOT NULL DEFAULT 0.50000 COMMENT '显著性',
+  sensitivity VARCHAR(32) NOT NULL DEFAULT 'normal' COMMENT '敏感等级',
+  evidence_count INT NOT NULL DEFAULT 1 COMMENT '证据数量',
+  version BIGINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '版本',
+  observed_at DATETIME(3) DEFAULT NULL COMMENT '观察时间',
+  valid_from DATETIME(3) DEFAULT NULL COMMENT '生效时间',
+  expires_at DATETIME(3) DEFAULT NULL COMMENT '过期时间',
+  last_confirmed_at DATETIME(3) DEFAULT NULL COMMENT '最后确认时间',
+  last_recalled_at DATETIME(3) DEFAULT NULL COMMENT '最后召回时间',
+  last_applied_at DATETIME(3) DEFAULT NULL COMMENT '最后应用时间',
+  apply_count INT NOT NULL DEFAULT 0 COMMENT '应用次数',
+  source_session_id BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '来源会话ID',
+  source_message_id BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '来源消息ID',
+  embedding_provider VARCHAR(64) NOT NULL DEFAULT '' COMMENT '向量服务商',
+  embedding_model VARCHAR(128) NOT NULL DEFAULT '' COMMENT '向量模型',
+  vector_id VARCHAR(128) NOT NULL DEFAULT '' COMMENT '向量ID',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_user_memories_canonical (tenant_id, project_id, user_id, canonical_hash),
+  KEY idx_user_memories_lookup (tenant_id, project_id, user_id, status, kind),
+  KEY idx_user_memories_expiry (status, expires_at),
+  KEY idx_user_memories_vector (vector_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='跨会话用户长期记忆表';
+
+CREATE TABLE user_memory_evidence (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  memory_id BIGINT UNSIGNED NOT NULL COMMENT '记忆ID',
+  tenant_id BIGINT UNSIGNED NOT NULL COMMENT '租户ID',
+  project_id BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '项目ID',
+  user_id BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
+  session_id BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '来源会话ID',
+  message_id BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '来源消息ID',
+  evidence_type VARCHAR(32) NOT NULL COMMENT '证据类型',
+  evidence_summary VARCHAR(512) NOT NULL DEFAULT '' COMMENT '脱敏证据摘要',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  PRIMARY KEY (id),
+  KEY idx_user_memory_evidence_memory (memory_id, created_at),
+  KEY idx_user_memory_evidence_source (tenant_id, project_id, user_id, session_id, message_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户记忆证据表';
+
+CREATE TABLE user_memory_events (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  memory_id BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '记忆ID',
+  tenant_id BIGINT UNSIGNED NOT NULL COMMENT '租户ID',
+  project_id BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '项目ID',
+  user_id BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
+  operation VARCHAR(32) NOT NULL COMMENT '操作类型',
+  memory_key VARCHAR(191) NOT NULL DEFAULT '' COMMENT '记忆键',
+  metadata_json JSON NOT NULL COMMENT '无敏感内容的审计元数据',
+  actor_user_id BIGINT UNSIGNED NOT NULL COMMENT '操作用户ID',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  PRIMARY KEY (id),
+  KEY idx_user_memory_events_scope (tenant_id, project_id, user_id, created_at),
+  KEY idx_user_memory_events_memory (memory_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户记忆事件表';
+
+CREATE TABLE chat_session_episodes (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  tenant_id BIGINT UNSIGNED NOT NULL COMMENT '租户ID',
+  project_id BIGINT UNSIGNED NOT NULL COMMENT '项目ID',
+  user_id BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
+  session_id BIGINT UNSIGNED NOT NULL COMMENT '会话ID',
+  summary TEXT NOT NULL COMMENT '会话滚动摘要',
+  topics_json JSON NOT NULL COMMENT '主题列表',
+  decisions_json JSON NOT NULL COMMENT '决策列表',
+  open_loops_json JSON NOT NULL COMMENT '未完成事项',
+  query_execution_ids_json JSON NOT NULL COMMENT '查询执行引用',
+  metadata_json JSON NOT NULL COMMENT '扩展元数据',
+  expires_at DATETIME(3) DEFAULT NULL COMMENT '过期时间',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_chat_session_episodes_session (session_id),
+  KEY idx_chat_session_episodes_scope (tenant_id, project_id, user_id, updated_at),
+  KEY idx_chat_session_episodes_expiry (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='跨会话情景记忆表';
+
+CREATE TABLE memory_jobs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  tenant_id BIGINT UNSIGNED NOT NULL COMMENT '租户ID',
+  project_id BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '项目ID',
+  user_id BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
+  session_id BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '会话ID',
+  message_id BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '消息ID',
+  job_type VARCHAR(32) NOT NULL COMMENT '任务类型',
+  payload_json JSON NOT NULL COMMENT '任务载荷',
+  status VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT '任务状态',
+  attempts INT NOT NULL DEFAULT 0 COMMENT '执行次数',
+  run_after DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '最早执行时间',
+  last_error TEXT DEFAULT NULL COMMENT '最后错误',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (id),
+  KEY idx_memory_jobs_poll (status, run_after, id),
+  KEY idx_memory_jobs_scope (tenant_id, project_id, user_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户记忆异步任务表';
+
 CREATE TABLE embed_apps (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   tenant_id BIGINT UNSIGNED NOT NULL COMMENT '租户ID',

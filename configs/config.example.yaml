@@ -6,6 +6,8 @@ app:
   name: ling-shu
   # 运行环境：local / dev / test / prod。
   env: local
+  # 浏览器未提供合法 IANA 时区且用户没有保存时区偏好时的 Agent 默认时区。
+  timezone: Asia/Shanghai
 
 server:
   # 服务监听地址。Docker/Kubernetes 中通常使用 0.0.0.0，本机开发也可以改成 127.0.0.1。
