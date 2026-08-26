@@ -524,7 +524,7 @@ CREATE TABLE user_memories (
   content TEXT NOT NULL COMMENT '可读记忆内容',
   value_json JSON NOT NULL COMMENT '结构化值',
   applicability_json JSON NOT NULL COMMENT '适用条件',
-  status VARCHAR(32) NOT NULL DEFAULT 'candidate' COMMENT '生命周期状态',
+  status VARCHAR(32) NOT NULL DEFAULT 'active' COMMENT '生命周期状态',
   source_type VARCHAR(32) NOT NULL DEFAULT 'inferred' COMMENT '来源类型',
   confidence DECIMAL(6,5) NOT NULL DEFAULT 0.50000 COMMENT '置信度',
   salience DECIMAL(6,5) NOT NULL DEFAULT 0.50000 COMMENT '显著性',

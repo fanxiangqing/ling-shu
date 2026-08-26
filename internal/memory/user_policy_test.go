@@ -42,6 +42,24 @@ func TestNormalizeUserMemoryOperationRecognizesIanaTimezone(t *testing.T) {
 	}
 }
 
+func TestBuildInferredUserMemoryIsActiveWithoutManualConfirmation(t *testing.T) {
+	now := time.Now()
+	item := BuildUserMemory(
+		UserScope{TenantID: 1, ProjectID: 2, UserID: 3},
+		UserMemoryOperation{
+			Action: UserMemoryActionRemember, Kind: UserMemoryKindProfile,
+			Content: "我负责项目经营分析", Confidence: 0.8,
+		},
+		UserMemorySourceInferred, 10, 20, now,
+	)
+	if item.Status != UserMemoryStatusActive {
+		t.Fatalf("expected inferred memory to become active, got %q", item.Status)
+	}
+	if item.LastConfirmedAt != nil {
+		t.Fatal("auto-activated inferred memory must not be marked as manually confirmed")
+	}
+}
+
 func TestSelectRelevantUserMemoriesPrefersProjectOverride(t *testing.T) {
 	now := time.Now()
 	project := BuildUserMemory(

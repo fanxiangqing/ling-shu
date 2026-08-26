@@ -111,9 +111,6 @@ func BuildUserMemory(scope UserScope, operation UserMemoryOperation, sourceType 
 		scope.ProjectID = 0
 	}
 	status := UserMemoryStatusActive
-	if sourceType == UserMemorySourceInferred {
-		status = UserMemoryStatusCandidate
-	}
 	confidence := operation.Confidence
 	if confidence <= 0 {
 		confidence = 1
@@ -132,7 +129,7 @@ func BuildUserMemory(scope UserScope, operation UserMemoryOperation, sourceType 
 		ObservedAt: &now, ValidFrom: &now, SourceSessionID: sessionID, SourceMessageID: messageID,
 		ExpiresAt: operation.ExpiresAt,
 	}
-	if status == UserMemoryStatusActive {
+	if sourceType == UserMemorySourceExplicit || sourceType == UserMemorySourceConfirmed {
 		item.LastConfirmedAt = &now
 	}
 	return item

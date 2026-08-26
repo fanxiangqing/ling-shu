@@ -41,7 +41,7 @@ The backend keeps the core analytics flow clear and modular: project management,
 - Metadata sync for schemas, tables, columns, indexes, primary keys, and foreign keys.
 - RAG over business terms, metric definitions, and FewShot SQL examples.
 - Structured session memory for focused result artifacts and follow-up chart requests, allowing bar, line, pie, or table transformations without repeating LLM or SQL work.
-- Cross-session user memory for stable preferences, responsibilities, and conventions, with explicit remember/forget commands, candidate confirmation, project overrides, semantic recall, and a personal management UI.
+- Cross-session user memory for stable preferences, responsibilities, and conventions, with explicit remember/forget commands, automatic extraction, project overrides, semantic recall, and a personal management UI.
 - Agent time context using the browser's IANA timezone and one request-scoped clock snapshot across planning, routing, Text2SQL, result synthesis, and memory extraction prompts.
 - Provider-based LLM, ASR, and TTS integrations. The current implementation focuses on Alibaba Cloud.
 - Realtime VoiceBI: streaming ASR input and streaming TTS playback.
@@ -115,13 +115,13 @@ Ling-Shu does not treat memory as replaying the entire raw chat history to the m
 
 ### Cross-Session User Memory
 
-Users can say "remember that I prefer bar charts", "what do you remember about me?", or "forget my chart preference" in chat. The **My Memory** modal opened from the sidebar also supports create, edit, confirm, reject, delete, and clear operations.
+Users can say "remember that I prefer bar charts", "what do you remember about me?", or "forget my chart preference" in chat. The **My Memory** modal opened from the sidebar also supports create, edit, delete, and clear operations.
 
-- Explicit memories become active immediately. Stable personal context inferred from ordinary conversations is stored as a `candidate` and is never injected into Agent prompts until the user confirms it.
+- Explicit memories and automatically extracted memories that pass safety and confidence checks become active immediately and remain editable or removable by the user.
 - Memory is project-scoped by default. Tenant-wide personal memory is created only when the user explicitly asks for all projects or selects that scope in the UI. A project value overrides a tenant-wide value with the same stable key.
 - Recall loads records by `tenant_id + project_id + user_id`, merges lexical and semantic scores, then filters status, expiry, sensitivity, duplicates, and prompt character budget.
 - Long-term memory accepts stable personal profiles, preferences, responsibilities, conventions, and corrections. Restricted sensitive content is rejected by policy. Recalled memory is labeled as user background data and cannot override the current request, data permissions, security rules, or metric definitions.
-- Ordinary turns update expiring session episodes. Durable `memory_jobs` asynchronously extract candidates and maintain vectors, retrying failures up to three times. Lexical recall remains available when Milvus is unavailable.
+- Ordinary turns update expiring session episodes. Durable `memory_jobs` asynchronously extract stable memories and maintain vectors, retrying failures up to three times. Lexical recall remains available when Milvus is unavailable.
 
 ### Agent Time Context
 

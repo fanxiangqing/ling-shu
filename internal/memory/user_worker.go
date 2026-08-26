@@ -107,20 +107,30 @@ func (w *UserMemoryWorker) process(ctx context.Context, job UserMemoryJob) error
 		return err
 	}
 	for _, operation := range operations {
-		item := BuildUserMemory(job.Scope, operation, UserMemorySourceInferred, job.SessionID, job.MessageID, time.Now())
-		if item.Status != UserMemoryStatusCandidate {
-			return fmt.Errorf("inferred memory must remain candidate")
+		now := time.Now()
+		item := BuildUserMemory(job.Scope, operation, UserMemorySourceInferred, job.SessionID, job.MessageID, now)
+		if item.Status != UserMemoryStatusActive {
+			return fmt.Errorf("inferred memory must be active")
 		}
 		evidence := UserMemoryEvidence{
 			Scope: item.Scope, SessionID: job.SessionID, MessageID: job.MessageID,
-			EvidenceType: UserMemorySourceInferred, EvidenceSummary: compactUserMemoryText(item.Content, 180), CreatedAt: time.Now(),
+			EvidenceType: UserMemorySourceInferred, EvidenceSummary: compactUserMemoryText(item.Content, 180), CreatedAt: now,
 		}
 		event := UserMemoryEvent{
-			Scope: item.Scope, Operation: "candidate", MemoryKey: item.Key,
-			Metadata: map[string]any{"kind": item.Kind, "source": "worker"}, ActorUserID: job.Scope.UserID, CreatedAt: time.Now(),
+			Scope: item.Scope, Operation: "inferred", MemoryKey: item.Key,
+			Metadata: map[string]any{"kind": item.Kind, "source": "worker", "auto_activated": true}, ActorUserID: job.Scope.UserID, CreatedAt: now,
 		}
-		if _, err := w.store.Upsert(ctx, item, evidence, event); err != nil {
+		saved, err := w.store.Upsert(ctx, item, evidence, event)
+		if err != nil {
 			return err
+		}
+		if w.semantic != nil && saved.ID > 0 {
+			if err := w.store.EnqueueJob(ctx, UserMemoryJob{
+				Scope: saved.Scope, JobType: "memory_index", Payload: map[string]any{"memory_id": saved.ID},
+				Status: "pending", RunAfter: now,
+			}); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

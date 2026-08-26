@@ -192,13 +192,15 @@ func (m *UserManager) RecordTurn(ctx context.Context, input UserTurnInput) error
 	if sensitiveTurn {
 		return nil
 	}
-	if candidate, ok := inferredMemoryCandidate(input.Question); ok {
-		item := BuildUserMemory(input.Scope, candidate, UserMemorySourceInferred, input.SessionID, input.UserMessageID, now)
+	if inferred, ok := inferredMemoryCandidate(input.Question); ok && ValidateUserMemoryOperation(inferred) == nil {
+		item := BuildUserMemory(input.Scope, inferred, UserMemorySourceInferred, input.SessionID, input.UserMessageID, now)
 		evidence := UserMemoryEvidence{Scope: item.Scope, SessionID: input.SessionID, MessageID: input.UserMessageID, EvidenceType: UserMemorySourceInferred, EvidenceSummary: compactUserMemoryText(input.Question, 180), CreatedAt: now}
-		event := UserMemoryEvent{Scope: item.Scope, Operation: "candidate", MemoryKey: item.Key, Metadata: map[string]any{"kind": item.Kind}, ActorUserID: input.Scope.UserID, CreatedAt: now}
-		if _, err := m.store.Upsert(ctx, item, evidence, event); err != nil {
+		event := UserMemoryEvent{Scope: item.Scope, Operation: "inferred", MemoryKey: item.Key, Metadata: map[string]any{"kind": item.Kind, "auto_activated": true}, ActorUserID: input.Scope.UserID, CreatedAt: now}
+		saved, err := m.store.Upsert(ctx, item, evidence, event)
+		if err != nil {
 			return err
 		}
+		m.enqueueVectorJob(ctx, saved, "memory_index", now)
 	}
 	payload := map[string]any{"question": input.Question, "timezone": input.Timezone}
 	return m.store.EnqueueJob(ctx, UserMemoryJob{

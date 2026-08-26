@@ -94,10 +94,13 @@ func (e *LLMUserMemoryExtractor) Extract(ctx context.Context, input UserTurnInpu
 	}
 	out := make([]UserMemoryOperation, 0, len(payload.Memories))
 	for _, operation := range payload.Memories {
+		if operation.Confidence < 0.65 || operation.Confidence > 1 {
+			continue
+		}
 		operation.Action = UserMemoryActionRemember
 		operation.ScopeLevel = UserMemoryScopeProject
 		operation = NormalizeUserMemoryOperation(operation, input.Question)
-		if operation.Confidence < 0.65 || ValidateUserMemoryOperation(operation) != nil {
+		if ValidateUserMemoryOperation(operation) != nil {
 			continue
 		}
 		out = append(out, operation)
@@ -122,9 +125,9 @@ func userMemoryInterpretPrompt(now time.Time, timezone string) string {
 }
 
 func userMemoryExtractionPrompt(now time.Time, timezone string) string {
-	return fmt.Sprintf(`你是用户长期记忆候选提取器。当前时间=%s，用户时区=%s。
+	return fmt.Sprintf(`你是用户长期记忆提取器。当前时间=%s，用户时区=%s。
 从当前一轮对话中提取最多 3 条稳定的用户个人信息、职责、偏好或长期约定。查询结果、实时数值、临时筛选、SQL、项目公共知识和助手推测都不能提取。
-所有结果只是 candidate，不会立即生效。输出 JSON，不要 Markdown：
+提取结果通过安全与置信度校验后会自动成为长期记忆，因此不确定、一次性或需要猜测的内容必须忽略。输出 JSON，不要 Markdown：
 {"memories":[{"kind":"preference|profile|convention|instruction|correction","memory_key":"","content":"","value":{},"confidence":0.0}]}
 没有合适内容时返回 {"memories":[]}。`, now.Format(time.RFC3339), timezone)
 }

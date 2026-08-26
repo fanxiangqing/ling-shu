@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS user_memories (
   content TEXT NOT NULL,
   value_json JSON NOT NULL,
   applicability_json JSON NOT NULL,
-  status VARCHAR(32) NOT NULL DEFAULT 'candidate',
+  status VARCHAR(32) NOT NULL DEFAULT 'active',
   source_type VARCHAR(32) NOT NULL DEFAULT 'inferred',
   confidence DECIMAL(6,5) NOT NULL DEFAULT 0.50000,
   salience DECIMAL(6,5) NOT NULL DEFAULT 0.50000,
