@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { NButton, NIcon, NSelect } from 'naive-ui'
-import { ChevronLeft, ChevronRight, LogOut } from '@lucide/vue'
+import { Brain, ChevronLeft, ChevronRight, LogOut } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
 import BrandMark from '@/components/common/BrandMark.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -17,6 +17,7 @@ defineProps<{
 
 const emit = defineEmits<{
   logout: []
+  'memory-open': []
 }>()
 
 const workspace = useWorkspaceStore()
@@ -116,6 +117,21 @@ function selectAuditSub(key: AuditSubKey) {
           <span v-if="!sidebarCollapsed">
             <strong>{{ item.label }}</strong>
             <em>{{ item.hint }}</em>
+          </span>
+        </button>
+
+        <button
+          v-if="item.key === 'chat'"
+          class="module-button"
+          type="button"
+          title="我的记忆"
+          aria-label="我的记忆"
+          @click="emit('memory-open')"
+        >
+          <NIcon :component="Brain" />
+          <span v-if="!sidebarCollapsed">
+            <strong>我的记忆</strong>
+            <em>偏好、约定和会话摘要</em>
           </span>
         </button>
 

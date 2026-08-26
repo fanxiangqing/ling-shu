@@ -223,6 +223,7 @@ export interface VoiceRealtimePayload {
   selected_datasource_ids?: number[]
   voice?: string
   format?: string
+  timezone?: string
 }
 
 export interface VoiceRealtimeHandlers {
@@ -346,7 +347,8 @@ function voiceRealtimeURL(sessionId: number, payload: VoiceRealtimePayload) {
     datasource_id: payload.datasource_id,
     selected_datasource_ids: selectedDatasourceIds,
     voice: payload.voice,
-    format: payload.format
+    format: payload.format,
+    timezone: payload.timezone
   })
   return websocketPath(`/chat/sessions/${sessionId}/voice/realtime${search}`)
 }

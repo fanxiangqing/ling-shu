@@ -174,6 +174,7 @@ export interface AskPayload {
   selected_datasource_ids?: number[]
   auto_execute: boolean
   max_rows: number
+  timezone?: string
 }
 
 export interface ApiEnvelope<T> {
@@ -254,6 +255,44 @@ export interface ChatSessionRecord extends BaseRecord {
   user_id: number
   title: string
   status?: string
+}
+
+export interface UserMemoryRecord extends BaseRecord {
+  scope: {
+    tenant_id: number
+    project_id: number
+    user_id: number
+  }
+  kind: 'preference' | 'profile' | 'convention' | 'instruction' | 'correction'
+  memory_key?: string
+  content: string
+  value?: Record<string, unknown>
+  status: 'candidate' | 'active' | 'superseded' | 'revoked' | 'expired' | 'quarantined'
+  source_type: 'explicit' | 'confirmed' | 'inferred' | 'imported'
+  confidence: number
+  salience: number
+  sensitivity: 'normal' | 'sensitive' | 'restricted'
+  evidence_count: number
+  version: number
+  expires_at?: string
+  last_recalled_at?: string
+  last_applied_at?: string
+  apply_count: number
+}
+
+export interface SessionEpisodeRecord extends BaseRecord {
+  scope: {
+    tenant_id: number
+    project_id: number
+    user_id: number
+  }
+  session_id: number
+  summary: string
+  topics?: string[]
+  decisions?: string[]
+  open_loops?: string[]
+  query_execution_ids?: number[]
+  expires_at?: string
 }
 
 export interface MetadataColumnRecord {

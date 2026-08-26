@@ -24,6 +24,7 @@ import { notify } from '@/composables/useNotify'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useUiStore } from '@/stores/ui'
 import { useProjectStore } from '@/stores/project'
+import { browserTimezone } from '@/utils/time'
 
 export const useChatStore = defineStore('chat', () => {
   const ws = useWorkspaceStore()
@@ -208,7 +209,8 @@ export const useChatStore = defineStore('chat', () => {
       content: question,
       selected_datasource_ids: project.projectDatasources.items.map((item) => item.id),
       auto_execute: true,
-      max_rows: maxRows.value
+      max_rows: maxRows.value,
+      timezone: browserTimezone()
     }
     let result: SendChatMessageResult
     try {

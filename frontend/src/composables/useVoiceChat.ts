@@ -28,6 +28,7 @@ import { notify } from '@/composables/useNotify'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useChatStore } from '@/stores/chat'
 import { useProjectStore } from '@/stores/project'
+import { browserTimezone } from '@/utils/time'
 
 const ASR_PROCESSOR_BUFFER_SIZE = 2048
 const ASR_PCM_FRAME_BYTES = 1600
@@ -147,7 +148,8 @@ export function useVoiceChat() {
       user_id: ws.context.userId,
       selected_datasource_ids: project.projectDatasources.items.map((item) => item.id),
       auto_execute: true,
-      max_rows: chat.maxRows
+      max_rows: chat.maxRows,
+      timezone: browserTimezone()
     }, {
       onOpen: () => {
         if (!scopedRun.isCurrent()) {

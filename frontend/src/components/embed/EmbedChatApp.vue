@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { NButton, NSpin } from 'naive-ui'
 import ChatWorkbench from '@/components/ChatWorkbench.vue'
+import { browserTimezone } from '@/utils/time'
 import {
   bootstrapEmbed,
   listEmbedMessages,
@@ -160,7 +161,8 @@ async function ask(question: string) {
       content: question,
       selected_datasource_ids: datasources.value.map((item) => item.id),
       auto_execute: true,
-      max_rows: maxRows.value
+      max_rows: maxRows.value,
+      timezone: browserTimezone()
     }, (event) => {
       const pending = messages.value.find((item) => item.id === pendingId)
       if (!pending) return
@@ -262,7 +264,8 @@ async function startVoiceInput() {
     embed_token: accessToken.value,
     selected_datasource_ids: datasources.value.map((item) => item.id),
     auto_execute: true,
-    max_rows: maxRows.value
+    max_rows: maxRows.value,
+    timezone: browserTimezone()
   }, {
     onOpen: () => {
       try {

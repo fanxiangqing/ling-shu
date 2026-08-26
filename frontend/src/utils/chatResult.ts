@@ -62,6 +62,7 @@ export function failedChatResult(question: string, error: string, steps: AgentEv
 export function streamMessageContent(event: AgentEvent, fallback: string) {
   if (isExecutionResultEvent(event)) return fallback
   if (isAnswerDeltaEvent(event)) return fallback
+  if (event.type === 'final') return fallback
   if (event.type === 'llm_delta') return event.name === 'llm.plan' ? '正在判断任务类型。' : '正在生成查询计划，并持续校验。'
   if (event.type === 'error') return event.content || '执行过程遇到错误，正在尝试修复。'
   if (event.name === 'sql.execute') return 'SQL 已通过审核，正在查询数据。'

@@ -16,6 +16,7 @@ export interface EmbedStreamPayload {
   selected_datasource_ids?: number[]
   auto_execute: boolean
   max_rows: number
+  timezone?: string
 }
 
 export interface EmbedVoiceRealtimePayload {
@@ -27,6 +28,7 @@ export interface EmbedVoiceRealtimePayload {
   selected_datasource_ids?: number[]
   voice?: string
   format?: string
+  timezone?: string
 }
 
 export interface EmbedVoiceRealtimeHandlers {
@@ -199,7 +201,8 @@ function embedVoiceRealtimeURL(sessionId: number, payload: EmbedVoiceRealtimePay
     datasource_id: payload.datasource_id,
     selected_datasource_ids: selectedDatasourceIds,
     voice: payload.voice,
-    format: payload.format
+    format: payload.format,
+    timezone: payload.timezone
   })
   return websocketPath(`/embed/chat/sessions/${sessionId}/voice/realtime${search}`)
 }

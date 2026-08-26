@@ -33,7 +33,9 @@ import type {
   RoleBindingRecord,
   RoleRecord,
   SendChatMessageResult,
+  SessionEpisodeRecord,
   TenantRecord,
+  UserMemoryRecord,
   UserRecord
 } from '@/types/domain'
 
@@ -324,6 +326,77 @@ export const chatApi = {
   },
   voiceRealtime(sessionId: number, payload: Parameters<typeof openVoiceChatRealtime>[1], handlers?: Parameters<typeof openVoiceChatRealtime>[2]) {
     return openVoiceChatRealtime(sessionId, payload, handlers)
+  }
+}
+
+function userMemoryBasePath(projectId: number, tenantId: number) {
+  return projectId > 0
+    ? `/projects/${projectId}/memories/me`
+    : `/tenants/${tenantId}/memories/me`
+}
+
+export const userMemoryApi = {
+  list(projectId: number, tenantId: number, params: { status?: string; kind?: string } & PageParams = {}) {
+    return request<PageResult<UserMemoryRecord>>(
+      `${userMemoryBasePath(projectId, tenantId)}${queryString({ tenant_id: tenantId, ...params })}`
+    )
+  },
+  create(projectId: number, payload: {
+    tenant_id: number
+    kind: UserMemoryRecord['kind']
+    memory_key?: string
+    content: string
+    value?: Record<string, unknown>
+    scope_level: 'project' | 'tenant'
+    expires_at?: string | null
+  }) {
+    return request<UserMemoryRecord>(userMemoryBasePath(projectId, payload.tenant_id), {
+      method: 'POST',
+      body: jsonBody(payload)
+    })
+  },
+  update(projectId: number, memoryId: number, payload: {
+    tenant_id: number
+    kind: UserMemoryRecord['kind']
+    memory_key?: string
+    content: string
+    value?: Record<string, unknown>
+    scope_level: 'project' | 'tenant'
+    expires_at?: string | null
+  }) {
+    return request<UserMemoryRecord>(`${userMemoryBasePath(projectId, payload.tenant_id)}/${memoryId}`, {
+      method: 'PATCH',
+      body: jsonBody(payload)
+    })
+  },
+  delete(projectId: number, memoryId: number, tenantId: number) {
+    return request<{ deleted: boolean }>(
+      `${userMemoryBasePath(projectId, tenantId)}/${memoryId}${queryString({ tenant_id: tenantId })}`,
+      { method: 'DELETE' }
+    )
+  },
+  confirm(projectId: number, memoryId: number, tenantId: number) {
+    return request<UserMemoryRecord>(
+      `${userMemoryBasePath(projectId, tenantId)}/${memoryId}/confirm${queryString({ tenant_id: tenantId })}`,
+      { method: 'POST' }
+    )
+  },
+  reject(projectId: number, memoryId: number, tenantId: number) {
+    return request<UserMemoryRecord>(
+      `${userMemoryBasePath(projectId, tenantId)}/${memoryId}/reject${queryString({ tenant_id: tenantId })}`,
+      { method: 'POST' }
+    )
+  },
+  clear(projectId: number, tenantId: number, includeTenant = false) {
+    return request<{ deleted: number }>(
+      `${userMemoryBasePath(projectId, tenantId)}${queryString({ tenant_id: tenantId, include_tenant: includeTenant })}`,
+      { method: 'DELETE' }
+    )
+  },
+  listEpisodes(projectId: number, tenantId: number, limit = 20) {
+    return request<SessionEpisodeRecord[]>(
+      `/projects/${projectId}/memory-episodes/me${queryString({ tenant_id: tenantId, limit })}`
+    )
   }
 }
 

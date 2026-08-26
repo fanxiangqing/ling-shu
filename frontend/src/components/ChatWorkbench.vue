@@ -126,11 +126,15 @@ function hasExecutionResults(message: ChatMessage) {
 }
 
 function showAnswerBelow(message: ChatMessage) {
-  return message.role === 'assistant' && Boolean(message.content.trim()) && (message.answerStreaming || hasExecutionResults(message))
+  return message.role === 'assistant' && Boolean(message.content.trim()) && (message.answerStreaming || hasExecutionResults(message) || hasCompletedSteps(message))
 }
 
 function showPrimaryMessageContent(message: ChatMessage) {
   return !showAnswerBelow(message)
+}
+
+function hasCompletedSteps(message: ChatMessage) {
+  return !message.pending && messageSteps(message).length > 0
 }
 
 function sameExecution(left?: QueryExecutionResult, right?: QueryExecutionResult) {
